@@ -42,14 +42,112 @@ Don't download everything now — each phase tells you what to grab when you get
 
 ## Lesson 0 — Environment
 
-**Goal:** Working PyTorch install that sees your GPU.
+**Goal:** Working PyTorch install that sees your GPU, in an isolated, reproducible
+environment.
 
-**Exercise:**
-- Install PyTorch with CUDA support (check pytorch.org for the right command for your
-  CUDA version — `nvidia-smi` above shows driver 590.48.01).
-- Install `torchvision`, `matplotlib`, `numpy`.
-- Write a 5-line script that creates a tensor, moves it to `cuda`, and prints the device
-  and `torch.cuda.get_device_name(0)`.
+**Status:** done for this repo, using `uv` + the `cookiecutter-uv` template. Steps below
+are documented so you can replicate this on another machine, and so you understand what
+each piece is doing rather than just having a working `venv` appear.
+
+### Setup steps (already applied to this repo)
+
+**1. Install uv**
+
+```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh
+# installs to ~/.local/bin — make sure that's on your PATH
+```
+
+**2. Check your GPU driver's max supported CUDA version**
+
+```bash
+nvidia-smi   # look at the "CUDA Version" field in the header
+```
+
+This tells you the *newest* CUDA toolkit your driver can run (drivers are
+backwards-compatible with older CUDA toolkit versions, not forwards). E.g. a driver
+reporting `CUDA Version: 13.1` can run wheels built for CUDA 13.0 or 13.1, but not 13.2+.
+This machine's driver (590.48.01) reports CUDA 13.1.
+
+**3. Scaffold the project with the uv cookiecutter template**
+
+```bash
+uvx cookiecutter https://github.com/fpgmaas/cookiecutter-uv.git --no-input \
+  project_name="object-recognition" \
+  author="Your Name" \
+  email="you@example.com"
+```
+
+`uvx` runs `cookiecutter` in a throwaway environment without installing it globally. This
+generates a full project (pyproject.toml, ruff/mypy/pytest config, pre-commit hooks,
+GitHub Actions CI, MkDocs docs site, Dockerfile, devcontainer) into a new
+`object-recognition/` directory — move its contents into your repo root (or generate it
+directly there if you don't already have other files to preserve).
+
+**4. Pin the Python version**
+
+```bash
+uv python pin 3.12
+```
+
+**5. Add non-GPU dependencies normally**
+
+```bash
+uv add numpy matplotlib pillow
+```
+
+**6. Add a CUDA-specific index for torch/torchvision**
+
+PyPI only hosts CPU-only PyTorch wheels; GPU wheels live on PyTorch's own index, split by
+CUDA version. Find the CUDA versions available and pick one at or below what your driver
+supports (step 2):
+
+```bash
+curl -s https://download.pytorch.org/whl/cu130/torch/ | grep -oP 'torch-[\d.]+(?=%2Bcu130)'
+```
+
+Then add this to `pyproject.toml` (already done in this repo — see the live file for the
+current version pins):
+
+```toml
+[project]
+dependencies = [
+    # ...
+    "torch>=2.13.0",
+    "torchvision>=0.25.0",
+]
+
+[tool.uv.sources]
+torch = [{ index = "pytorch-cu130" }]
+torchvision = [{ index = "pytorch-cu130" }]
+
+[[tool.uv.index]]
+name = "pytorch-cu130"
+url = "https://download.pytorch.org/whl/cu130"
+explicit = true
+```
+
+Swap `cu130` for whatever CUDA version fits your driver.
+
+**7. Install everything**
+
+```bash
+uv sync
+```
+
+**8. Install pre-commit hooks**
+
+```bash
+make install   # runs `uv sync` + `uv run pre-commit install`
+```
+
+### Your exercise
+
+The one part left for you: write a small script (`lessons/lesson0_environment/`) that
+creates a tensor, moves it to `cuda`, and prints the device and
+`torch.cuda.get_device_name(0)` — run it with `uv run python lessons/lesson0_environment/<file>.py`
+to confirm your environment actually works end to end, not just that install commands
+succeeded.
 
 **Checkpoint:** What's the difference between a CUDA "driver version" and the CUDA
 version PyTorch was built against? Why can they differ?

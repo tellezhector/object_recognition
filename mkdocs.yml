@@ -1,0 +1,52 @@
+site_name: object-recognition
+repo_url: https://github.com/tellezhector/object_recognition
+site_url: https://tellezhector.github.io/object_recognition
+site_description: This is a template repository for Python projects that use uv for their dependency management.
+site_author: Hector Tellez
+edit_uri: edit/main/docs/
+repo_name: tellezhector/object_recognition
+copyright: Maintained by <a href="https://github.com/tellezhector">Hector Tellez</a>.
+
+nav:
+  - Home: index.md
+  - Modules: modules.md
+plugins:
+  - search
+  - mkdocstrings:
+      handlers:
+        python:
+          paths: ["object_recognition"]
+theme:
+  name: material
+  feature:
+    tabs: true
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: white
+      accent: deep orange
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: black
+      accent: deep orange
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  icon:
+    repo: fontawesome/brands/github
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/tellezhector/object_recognition
+    - icon: fontawesome/brands/python
+      link: https://pypi.org/project/object-recognition
+
+markdown_extensions:
+  - toc:
+      permalink: true
+  - pymdownx.arithmatex:
+      generic: true
