@@ -392,7 +392,7 @@ scores. Write up what worked, what didn't, and what you'd try next.
 
 ## Progress
 
-- [ ] Lesson 0 — Environment
+- [x] Lesson 0 — Environment
 - [ ] Lesson 1 — Tensors & autograd
 - [ ] Lesson 2 — Data loading
 - [ ] Lesson 3 — Build a CNN from scratch
