@@ -169,8 +169,45 @@ hand: create `w`, `b` as tensors with `requires_grad=True`, write the forward pa
 loss, call `.backward()`, and manually update `w`/`b` inside a `torch.no_grad()` block, in
 a loop, on some synthetic data you generate yourself. Get the loss to converge.
 
+**Syntax primer:** these snippets show the mechanics on a toy example that is *not* your
+regression — don't copy them in, use them to see how the pieces behave.
+
+Creating a tensor that tracks gradients, and reading its grad after `.backward()`:
+
+```python
+import torch
+
+a = torch.tensor(3.0, requires_grad=True)
+out = a ** 2          # some differentiable expression using a
+out.backward()        # populates a.grad with d(out)/d(a)
+print(a.grad)          # -> 6.0  (d/da of a^2 is 2a, at a=3)
+```
+
+Note `out` here is a scalar — `.backward()` needs a scalar to call it with no arguments
+(that's what your loss will be). If you call it a second time without clearing grads
+first, PyTorch *adds* the new gradient onto whatever's already in `.grad` rather than
+replacing it — that's why a real training loop zeroes grads each iteration:
+
+```python
+a.grad.zero_()   # or: reset it however you update your params each step
+```
+
+Updating a tensor's value in place, without autograd trying to track that update as part
+of the graph:
+
+```python
+with torch.no_grad():
+    a -= 0.1 * a.grad   # a "step" in the direction that shrinks `out`
+```
+
+Generating synthetic data is just tensor creation — e.g. `torch.rand`, `torch.randn`, or
+building an input tensor by hand and computing a target from some formula you pick plus
+noise. Look up `torch.randn` and `torch.manual_seed` if you want reproducible noise.
+
 **Checkpoint:** Why do you need `torch.no_grad()` when updating the weights? What would
 go wrong if you forgot `zero_grad()` on the second iteration?
+
+P.S. Watch: https://www.youtube.com/watch?v=VMj-3S1tku0
 
 ### Lesson 2 — Data loading
 
