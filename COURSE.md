@@ -164,6 +164,44 @@ APIs that hide it.
 **Concepts:** tensors vs numpy arrays, `requires_grad`, computational graphs, `.backward()`,
 `.grad`, why we `zero_grad()`.
 
+**What is autograd?**
+
+Autograd is PyTorch's automatic differentiation engine — the machinery that computes
+gradients for you, so you don't have to derive and hand-code calculus by hand every time
+you change your model. Here's the mental model, step by step:
+
+1. **Every tensor operation gets recorded.** When a tensor has `requires_grad=True`, any
+   operation you do with it (`+`, `*`, `**`, matrix multiplies, anything differentiable)
+   doesn't just compute a result — PyTorch also silently records *what operation produced
+   it* and *what its inputs were*. Do this across several chained operations and you build
+   up a **computational graph**: a record of every step from your inputs to your final
+   output.
+
+2. **The graph flows forward, gradients flow backward.** This recording happens during
+   your normal "forward pass" — the part where you compute `prediction`, then `loss`, from
+   your inputs. Once you have a single scalar number (like a loss value) at the end of that
+   chain, calling `.backward()` walks the graph in reverse, applying the chain rule from
+   calculus at each recorded step, to work out exactly how much each `requires_grad=True`
+   tensor upstream contributed to that final number.
+
+3. **The result lands in `.grad`.** For every leaf tensor involved (a tensor you created
+   directly with `requires_grad=True`, as opposed to one PyTorch computed along the way),
+   `.backward()` fills in `.grad` with "if I nudge this tensor's value up slightly, how much
+   does the final output change?" — the partial derivative of the output with respect to
+   that tensor.
+
+4. **You do the rest.** Autograd only computes gradients — it doesn't decide what to do
+   with them. That's why you write the update step yourself: subtract a small multiple of
+   `.grad` from each parameter (that's gradient descent), inside `torch.no_grad()` so that
+   update itself isn't recorded as *another* operation on the graph.
+
+Why this matters: without autograd, you'd have to manually work out `d(loss)/d(w)` and
+`d(loss)/d(b)` by hand for every architecture you ever write — fine for `y = wx + b`,
+completely impractical for a 50-layer CNN. Autograd is what makes arbitrarily complex,
+differentiable models trainable without hand-deriving calculus each time. High-level APIs
+like `torch.nn` and PyTorch's optimizers are convenience layers *on top of* autograd — this
+lesson has you skip them so you see the engine underneath before you rely on it invisibly.
+
 **Exercise:** Without using `torch.nn`, implement linear regression (`y = wx + b`) by
 hand: create `w`, `b` as tensors with `requires_grad=True`, write the forward pass, MSE
 loss, call `.backward()`, and manually update `w`/`b` inside a `torch.no_grad()` block, in
@@ -430,7 +468,7 @@ scores. Write up what worked, what didn't, and what you'd try next.
 ## Progress
 
 - [x] Lesson 0 — Environment
-- [ ] Lesson 1 — Tensors & autograd
+- [x] Lesson 1 — Tensors & autograd
 - [ ] Lesson 2 — Data loading
 - [ ] Lesson 3 — Build a CNN from scratch
 - [ ] Lesson 4 — Training loop
