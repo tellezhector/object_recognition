@@ -141,6 +141,22 @@ uv sync
 make install   # runs `uv sync` + `uv run pre-commit install`
 ```
 
+**9. Jupyter (optional, for notebooks)**
+
+Some lessons are easier to explore interactively — plotting data, watching a training
+loop's output evolve cell by cell — than as a flat script. `jupyterlab` and `ipykernel`
+are dev dependencies already in `pyproject.toml`, so no separate install or kernel
+registration is needed. To start it:
+
+```bash
+uv run jupyter lab
+```
+
+This opens JupyterLab in your browser, using the project's own `.venv` (same
+torch/CUDA setup as your scripts) as the kernel. Navigate to a lesson's `.ipynb` file and
+run cells with `Shift+Enter`. Plain `.py` scripts remain fine for lessons that don't need
+visualization — notebooks are opt-in, not a replacement.
+
 ### Your exercise
 
 The one part left for you: write a small script (`lessons/lesson0_environment/`) that
