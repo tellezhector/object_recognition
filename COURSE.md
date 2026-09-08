@@ -270,6 +270,10 @@ P.S. Watch: https://www.youtube.com/watch?v=VMj-3S1tku0
 **Concepts:** `Dataset`, `DataLoader`, batching, `transforms.Compose`, normalization,
 train/test split.
 
+The CIFAR-10  dataset consists of 60000 32x32 colour images in 10 classes, with
+6000 images per class. There are 50000 training images and 10000 test images.
+https://cave.cs.toronto.edu/kriz/cifar.html
+
 **Exercise:** Load CIFAR-10 via `torchvision.datasets.CIFAR10` (it'll download
 automatically). Build train and test `DataLoader`s. Write a small script that pulls one
 batch and prints its shape and dtype, and displays a few images with their labels using
