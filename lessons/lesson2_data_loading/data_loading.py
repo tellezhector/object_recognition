@@ -61,40 +61,47 @@ train_dataset = datasets.CIFAR10(root=DATA_DIR, train=True, download=True, trans
 loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=False, num_workers=1)
 
 
-sum_per_channel = torch.zeros(3)
-
-# image_num = len(train_dataset)
-# print(f"{image_num=}") # expect 50k
-# we will redefine image_num temporarily to work with smaller samples
-image_num = 0
+# One streaming pass. Instead of subtracting the mean per image (which needs the
+# mean up front, hence a second pass), accumulate the per-channel sum of x and of
+# x**2. Then:
+#   mean = sum(x) / N
+#   var  = sum(x**2) / N - mean**2      # E[x**2] - E[x]**2
+#   std  = sqrt(var)
+# float64 accumulators so precision doesn't erode as the totals grow.
+channel_sum = torch.zeros(3, dtype=torch.float64)
+channel_sq_sum = torch.zeros(3, dtype=torch.float64)
+n_pixels = 0
 
 n_batches = len(loader)  # ceil(len(train_dataset) / BATCH_SIZE)
-
-print(f"pass 1/2: mean over {len(train_dataset)} images, {n_batches} batches")
+print(f"mean/std over {len(train_dataset)} images, {n_batches} batches")
 for i, (images, _labels) in enumerate(loader, start=1):
-    image_num += images.shape[0]
-    sum_per_channel += images.sum(dim=(0, 2, 3))
-    if i % 50 == 0 or i == n_batches:
-        print(f"  batch {i:>4}/{n_batches}  ({image_num} images)")
+    # cast this batch from float32 to float64 before summing, so the running
+    # totals keep full precision as they grow. shape is (B, C, H, W).
+    # B = batch size, C = channels, H = height, W = width
+    images = images.double()
 
-n_pixels = image_num * 32 * 32  # 50k * 32 * 32
-mean = sum_per_channel / n_pixels
+    # sum over dims 0, 2, 3 (batch, height, width) but NOT dim 1 (channel):
+    # collapse every pixel of every image in the batch down to one total per
+    # channel. (B, C, H, W) -> (C,), i.e. shape (3,).
+    channel_sum += images.sum(dim=(0, 2, 3))
+
+    # `**` is the power operator, applied ELEMENT-WISE: images**2 squares every
+    # pixel independently, same shape back. (Not matrix multiply -- that's `@` or
+    # torch.matmul. Element-wise product would be `images * images`, same result
+    # here.) Then sum per channel, exactly like channel_sum above.
+    channel_sq_sum += (images**2).sum(dim=(0, 2, 3))
+    # pixels-per-channel in this batch: B * H * W (no hardcoded 32)
+    n_pixels += images.shape[0] * images.shape[2] * images.shape[3]
+    if i % 50 == 0 or i == n_batches:
+        print(f"  batch {i:>4}/{n_batches}  ({n_pixels} px/channel)")
+
+mean = channel_sum / n_pixels
+# clamp guards against a tiny negative variance from floating-point rounding
+std = (channel_sq_sum / n_pixels - mean**2).clamp(min=0).sqrt()
+
+mean, std = mean.float(), std.float()
 print(f"{mean=}")  # expect (0.4914, 0.4822, 0.4465)
-
-
-# sum of squared deviations from the mean, per channel
-sq_dev_sum = torch.zeros(3)
-print(f"pass 2/2: std over {len(train_dataset)} images, {n_batches} batches")
-for i, (images, _labels) in enumerate(loader, start=1):
-    # mean is (3,); view it as (3, 1, 1) so it broadcasts against each
-    # (3, 32, 32) image: channel lines up, height/width are stretched.
-    sq_dev_sum += ((images - mean.view(3, 1, 1)) ** 2).sum(dim=(0, 2, 3))
-    if i % 50 == 0 or i == n_batches:
-        print(f"  batch {i:>4}/{n_batches}")
-
-# variance = mean of squared deviations; std = its square root
-std = torch.sqrt(sq_dev_sum / n_pixels)
-print(f"{std=}")  # expect (0.2470, 0.2435, 0.2616) on the full set
+print(f"{std=}")  # expect (0.2470, 0.2435, 0.2616)
 
 
 # ---------------------------------------------------------------------------
