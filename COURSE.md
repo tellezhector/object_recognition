@@ -291,9 +291,52 @@ by wiring one together yourself.
 `nn.Linear`, activation functions, how spatial dimensions shrink layer to layer, flattening
 before the FC head.
 
+**What does a convolution actually do?**
+
+1. **A kernel is a small sliding filter.** `nn.Conv2d` holds a set of learnable weight
+   grids (kernels), e.g. 3×3. Each kernel slides across the input and at every position
+   computes a weighted sum of the pixels under it — one output value per position. Slide
+   it across the whole image and you get a full output grid (a "feature map").
+
+2. **`in_channels`/`out_channels` set how many kernels and what they see.** Each kernel
+   spans all of the input's channels at once (a 3×3 kernel on an RGB image is really
+   3×3×3 = 27 weights), so `in_channels` must match the previous layer's `out_channels`
+   (3 for a raw RGB image). `out_channels` is how many independent kernels this layer
+   learns in parallel — each one free to specialize in detecting a different local
+   pattern (an edge, a color transition, later a texture).
+
+3. **`stride` controls how far the kernel jumps between positions.** `stride=1` moves one
+   pixel at a time (dense overlap). `stride=2` skips every other position, roughly
+   halving the output size — stride does downsampling as part of the convolution itself.
+
+4. **`padding` adds a border (usually zeros) before convolving.** A kernel can't be
+   centered on the outermost pixels without something to overlap past the edge, so
+   without padding, each conv shrinks the spatial size by `kernel_size - 1`. `padding=1`
+   with a 3×3 kernel exactly cancels that shrink ("same" padding) — output H/W equals
+   input H/W.
+
+5. **Putting 2-4 together, the output size formula is:**
+   `out = floor((in + 2*padding - kernel_size) / stride) + 1` — this is what you'll use
+   to fill in the shape table in the Lesson 3 scaffold.
+
+6. **`nn.MaxPool2d(kernel_size=k)` shrinks spatially without learned weights** — it just
+   takes the max value in each k×k block, defaulting to `stride=k` so blocks don't
+   overlap (e.g. `k=2` exactly halves H and W). This reduces compute and adds a little
+   tolerance to small shifts in where a feature appears.
+
+7. **Activation functions (e.g. `nn.ReLU`) between layers are what makes stacking
+   layers meaningful.** Without a nonlinearity between them, any stack of Conv/Linear
+   layers collapses mathematically into one big linear function — no matter how many
+   you chain, you'd gain nothing over a single layer.
+
+8. **Flattening bridges "where are features" to "what class is this."** After your conv
+   blocks, the remaining tensor is (channels, H, W) per image — a spatial map, not a
+   decision. `nn.Flatten()` (or `x.view(x.size(0), -1)`) collapses that into one vector
+   per image so `nn.Linear` layers can combine everything detected into class scores.
+
 **Exercise:** Subclass `nn.Module` and write a small CNN for CIFAR-10 (something like
-2-3 conv blocks + 1-2 FC layers — architecture choices are yours). Before running
-anything, work out on paper what the output shape is after each layer given a 32×32×3
+2-3 conv blocks + 1-2 FC (Fully Connected) layers — architecture choices are yours).
+Before running anything, work out on paper what the output shape is after each layer given a 32×32×3
 input, and verify it matches at runtime.
 
 **Checkpoint:** Given `Conv2d(in_channels=3, out_channels=16, kernel_size=3, padding=1)`
@@ -306,6 +349,40 @@ on a 32×32 input, what's the output shape, and why does `padding=1` matter here
 **Concepts:** loss functions (`CrossEntropyLoss` — and why you don't need a softmax layer
 before it), optimizers (`SGD` vs `Adam`), epochs vs steps, `model.train()`/`model.eval()`,
 tracking loss/accuracy.
+
+**What are `CrossEntropyLoss`, and `SGD` vs `Adam`, actually doing?**
+
+1. **Your model's last layer outputs raw scores ("logits"), not probabilities.** A
+   `Linear` layer's output can be any real number, positive or negative — nothing forces
+   it to look like a probability distribution (values in [0,1] summing to 1).
+
+2. **`CrossEntropyLoss` applies softmax internally, then penalizes the log-probability of
+   the correct class.** Softmax converts logits into probabilities (exponentiate, then
+   divide by the sum, so they're positive and sum to 1). Cross-entropy then measures
+   `-log(probability assigned to the true class)` — low when the model is confidently
+   correct, and it blows up (→ ∞) the more confidently wrong the model is. PyTorch's
+   `CrossEntropyLoss` does both steps internally, combined for numerical stability, and
+   expects raw logits as input — that's why adding your own softmax before it is wrong:
+   you'd be softmaxing twice, distorting the gradient.
+
+3. **Gradient descent means "step opposite the gradient, scaled by a learning rate."**
+   `SGD` does close to exactly that, per batch: `param -= lr * param.grad` (optionally
+   with momentum — a running average of recent gradients, so it doesn't fully reverse
+   direction on every noisy batch).
+
+4. **`Adam` adapts the step size per-parameter using running statistics of the gradient.**
+   It tracks a running average of each parameter's gradient (like momentum) *and* a
+   running average of the gradient's square, then divides the step by roughly the square
+   root of that second average. Parameters with small/consistent gradients get bigger
+   effective steps; parameters with large/noisy gradients get smaller ones. This usually
+   converges faster and needs less learning-rate tuning than plain `SGD`, at the cost of
+   more memory (it stores two extra running averages per parameter).
+
+5. **`model.train()`/`model.eval()` toggle behavior in specific layer types** — most
+   layers behave identically either way; it only matters for layers like `Dropout`
+   (active only in train) and `BatchNorm` (uses batch statistics in train, running
+   statistics in eval). This is exactly what Lesson 4's checkpoint is asking you to
+   notice about your own architecture.
 
 **Exercise:** Write the training loop for your Lesson 3 model: for each epoch, iterate
 batches, forward pass, compute loss, backward, optimizer step, and log train loss +
@@ -322,6 +399,44 @@ changes nothing yet, what layer would you need to add for it to matter?
 
 **Concepts:** `BatchNorm2d`, `Dropout`, data augmentation (`RandomCrop`, `RandomHorizontalFlip`),
 weight decay, learning rate scheduling.
+
+**What do these regularization techniques actually do?**
+
+1. **`BatchNorm2d` normalizes activations mid-network, per channel, using the current
+   batch's statistics.** For each channel, it subtracts that batch's mean and divides by
+   that batch's std (then applies a small learned scale/shift), so activations flowing
+   into the next layer stay in a consistent, well-behaved range regardless of how the
+   previous layer's outputs happen to be distributed. This mainly speeds up and
+   stabilizes training, but as a side effect the batch-dependent noise it introduces also
+   mildly regularizes.
+
+2. **`Dropout` randomly zeroes a fraction of activations, only during training.** Each
+   forward pass, every unit has some probability `p` of being set to 0. This prevents the
+   network from becoming overly reliant on any single unit or specific combination of
+   units — it's forced to learn redundant, more robust representations. At eval time
+   dropout is disabled (all units active) — which is exactly why `model.eval()` matters
+   once you add this layer.
+
+3. **Data augmentation manufactures new training variety from existing images.**
+   `RandomCrop`/`RandomHorizontalFlip` (and friends) apply a random transform *each time*
+   an image is loaded — so the model never sees the exact same pixels twice across
+   epochs, even though the underlying image repeats. This makes memorizing individual
+   training images a less useful strategy than learning features that generalize.
+
+4. **Weight decay penalizes large weights.** It adds a term proportional to the sum of
+   squared weights onto the loss (equivalently, subtracts a small fraction of each
+   weight's value every step, independent of the gradient). Smaller weights generally
+   mean a smoother, less extreme function — one less likely to have contorted itself to
+   fit training-set noise.
+
+5. **Learning rate scheduling shrinks the step size as training progresses.** Early on,
+   large steps make fast progress toward a good region of parameter space; late in
+   training, those same large steps tend to overshoot and bounce around near a minimum
+   instead of settling into it. Reducing the LR (via `StepLR`, `CosineAnnealingLR`, etc.)
+   lets later epochs make smaller, more precise refinements.
+
+All five are separate levers for the same underlying goal: keep the model from fitting
+training-set-specific noise instead of the general pattern.
 
 **Exercise:** Train your Lesson 4 setup long enough to see train/val accuracy diverge
 (overfitting). Then apply at least two of: batch norm, dropout, augmentation, weight
@@ -435,6 +550,34 @@ before you use a library that does them for you.
 **Concepts:** Intersection over Union, anchor boxes, how a detector proposes many
 candidate boxes then filters, Non-Maximum Suppression.
 
+**What are IoU, anchor boxes, and NMS?**
+
+1. **Intersection over Union (IoU) measures how much two boxes overlap, as a single
+   number from 0 to 1.** It's `area(box1 ∩ box2) / area(box1 ∪ box2)` — the area they
+   share, divided by the total area either one covers. Two identical boxes give IoU=1;
+   two boxes that don't touch give IoU=0. It's the standard way to ask "is this predicted
+   box close enough to the true box to count as correct?"
+
+2. **Anchor boxes are a fixed grid of reference boxes tiled across the image, at several
+   scales and aspect ratios.** Instead of asking the network to predict raw box
+   coordinates from nothing (a hard regression problem — where in the image, what size,
+   what shape, all at once), each anchor gives it a starting guess, and the network only
+   has to predict a small adjustment ("a bit wider than this anchor, shifted slightly
+   left") plus a class/confidence score for that anchor. This is a much easier learning
+   problem, and it's why detectors output *many* candidate boxes — one prediction per
+   anchor, most anchors overlapping no real object at all.
+
+3. **That flood of candidates is mostly redundant.** A real object near an anchor
+   typically gets high-confidence predictions from several *neighboring* anchors too, all
+   describing roughly the same box. Left alone, you'd report the same object 5-10 times.
+
+4. **Non-Maximum Suppression (NMS) collapses duplicates down to one box per object.**
+   Sort all candidate boxes by confidence score, descending. Take the highest-scoring
+   box, keep it, and discard every remaining box whose IoU with it exceeds some threshold
+   (e.g. 0.5) — those are almost certainly the same object. Repeat with the next
+   highest-scoring box still remaining, until none are left. The result: one box per
+   real object, the most confident one in each overlapping cluster.
+
 **Exercise:** Implement `iou(box1, box2)` yourself (no library) and test it against
 hand-computed cases. Then implement NMS yourself: given a list of boxes with scores,
 return the kept boxes. Test it on a synthetic case with overlapping boxes you construct.
@@ -465,6 +608,34 @@ that classification models don't need?
 
 **Concepts:** precision/recall at an IoU threshold, precision-recall curves, mean Average
 Precision, why mAP is reported at specific IoU thresholds (e.g. mAP@0.5).
+
+**What is mAP actually measuring?**
+
+1. **A detection only counts as a true positive if both the class and the box are
+   right.** "Right" for the class is a plain match. "Right" for the box means IoU (from
+   Lesson 12) against the matching ground-truth box exceeds a chosen threshold — e.g. at
+   mAP@0.5, a correct-class prediction whose box only reaches IoU=0.3 with the true box
+   still counts as a false positive. That's the split accuracy alone can't express:
+   detection has to be right about *both* what and where.
+
+2. **Precision and recall trade off as you change the confidence threshold you accept.**
+   Precision = TP/(TP+FP) — of the boxes you kept, how many were correct. Recall =
+   TP/(TP+FN) — of all real objects, how many did you find. Lowering your acceptance
+   threshold finds more true positives (recall ↑) but also lets in more false ones
+   (precision ↓). Sweeping the threshold from strict to loose traces a precision-recall
+   curve for one class.
+
+3. **Average Precision (AP) is the area under that curve, for one class.** A model that
+   stays high-precision even as recall increases (rare) scores near 1.0; one that trades
+   away precision fast for small recall gains scores lower.
+
+4. **mAP is just the mean of AP across all classes** — one number summarizing overall
+   detector quality, per class weighted equally regardless of how common that class is.
+
+5. **The IoU threshold in "mAP@0.5" sets how strict "the box was right" needs to be.**
+   Reporting mAP at multiple thresholds (0.5, 0.75, …) shows whether a model is merely
+   finding the right general area (passes at 0.5, fails at 0.75) or genuinely localizing
+   tightly (passes at both) — a looser threshold alone can hide sloppy box placement.
 
 **Exercise:** Run your Lesson 13 model on VOC's test set. Implement (or carefully use a
 library for, your choice — but understand it first) mAP@0.5 computation. Report per-class
