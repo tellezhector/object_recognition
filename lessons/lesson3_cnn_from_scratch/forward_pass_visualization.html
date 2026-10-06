@@ -1,0 +1,798 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CNN Forward Pass</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<style>
+/* Layout: left stage-rail/canvas viewer with a sliding kernel-window overlay; right
+   computation readout panel. Two columns above 760px, stacked single column below. */
+:root{
+  --bg:#f9f9f7; --surface:#fcfcfb; --surface-2:#ffffff;
+  --text:#0b0b0b; --text-2:#52514e; --muted:#898781;
+  --border:rgba(11,11,11,0.10); --gridline:#e1e0d9;
+  --accent:#2a78d6; --accent-ink:#ffffff; --neg:#e34948;
+  --sans:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    color-scheme: dark;
+    --bg:#0d0d0d; --surface:#1a1a19; --surface-2:#202020;
+    --text:#ffffff; --text-2:#c3c2b7; --muted:#898781;
+    --border:rgba(255,255,255,0.10); --gridline:#2c2c2a;
+    --accent:#3987e5; --accent-ink:#ffffff; --neg:#e66767;
+  }
+}
+:root[data-theme="dark"]{
+  color-scheme: dark;
+  --bg:#0d0d0d; --surface:#1a1a19; --surface-2:#202020;
+  --text:#ffffff; --text-2:#c3c2b7; --muted:#898781;
+  --border:rgba(255,255,255,0.10); --gridline:#2c2c2a;
+  --accent:#3987e5; --accent-ink:#ffffff; --neg:#e66767;
+}
+*{ box-sizing:border-box; }
+body{ background:var(--bg); color:var(--text); font-family:var(--sans); }
+.page{ max-width:980px; margin:0 auto; padding-inline:16px; padding-block:28px 48px; }
+h1{ font-size:1.5rem; font-weight:700; margin:0 0 4px; text-wrap:balance; }
+.sub{ color:var(--text-2); font-size:0.92rem; line-height:1.5; max-width:62ch; margin:0 0 20px; }
+.sub code{ font-family:var(--mono); font-size:0.85em; background:var(--surface-2); border:1px solid var(--border); border-radius:4px; padding:1px 5px; }
+
+.stage-rail{ display:flex; gap:6px; overflow-x:auto; padding-bottom:10px; margin-bottom:16px; border-bottom:1px solid var(--border); scrollbar-width:thin; }
+.stage-pill{ flex:0 0 auto; font-family:var(--sans); font-size:0.78rem; font-weight:600; letter-spacing:0.01em; color:var(--text-2); background:var(--surface); border:1px solid var(--border); border-radius:999px; padding:7px 14px; cursor:pointer; white-space:nowrap; transition:background 0.15s, color 0.15s, border-color 0.15s; }
+.stage-pill:hover{ border-color:var(--accent); color:var(--text); }
+.stage-pill.active{ background:var(--accent); color:var(--accent-ink); border-color:var(--accent); }
+
+.viewer-grid{ display:grid; grid-template-columns:minmax(0,380px) minmax(0,1fr); gap:20px; align-items:start; }
+@media (max-width:760px){ .viewer-grid{ grid-template-columns:1fr; } }
+
+.panel{ background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:16px; min-width:0; }
+.panel h2{ font-size:0.95rem; font-weight:700; margin:0 0 6px; }
+.panel .caption{ color:var(--text-2); font-size:0.82rem; line-height:1.5; margin:0 0 14px; }
+
+.row{ display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-bottom:10px; }
+.row.between{ justify-content:space-between; }
+.chip-btn{ font-family:var(--sans); font-size:0.78rem; font-weight:600; color:var(--text); background:var(--surface-2); border:1px solid var(--border); border-radius:6px; padding:5px 10px; cursor:pointer; }
+.chip-btn:hover{ border-color:var(--accent); }
+.chip-btn:disabled{ opacity:0.4; cursor:default; }
+.chip-label{ font-size:0.78rem; color:var(--text-2); font-variant-numeric:tabular-nums; min-width:0; }
+
+.canvas-wrap{ position:relative; display:inline-block; max-width:100%; overflow:auto; border:1px solid var(--border); border-radius:6px; background:var(--surface-2); }
+.canvas-wrap canvas{ display:block; cursor:pointer; }
+.window-box{ position:absolute; border:2px solid var(--accent); box-shadow:0 0 0 1px var(--surface-2); pointer-events:none; border-radius:2px; }
+.window-box.hidden{ display:none; }
+
+.panel-label{ font-size:0.72rem; color:var(--muted); font-weight:600; margin:4px 0 6px; }
+.legend{ font-size:0.74rem; color:var(--muted); margin-top:8px; line-height:1.5; }
+.legend .sw{ display:inline-block; width:9px; height:9px; border-radius:2px; margin-right:4px; vertical-align:-1px; }
+
+.formula{ font-family:var(--mono); font-size:0.82rem; background:var(--surface-2); border:1px solid var(--border); border-radius:6px; padding:10px 12px; margin:0 0 14px; line-height:1.6; overflow-x:auto; }
+.formula .val{ color:var(--accent); font-weight:600; }
+.formula .neg{ color:var(--neg); }
+
+.minigrid-row{ display:flex; gap:10px; flex-wrap:wrap; margin-bottom:14px; }
+.minigrid{ text-align:center; }
+.minigrid .mg-label{ font-size:0.72rem; color:var(--muted); margin-bottom:4px; font-weight:600; }
+.minigrid table{ border-collapse:collapse; }
+.minigrid td{ width:30px; height:22px; font-family:var(--mono); font-size:0.64rem; text-align:center; border:1px solid var(--border); font-variant-numeric:tabular-nums; }
+
+.bar-strip{ display:flex; align-items:flex-end; gap:2px; height:70px; margin-bottom:6px; overflow-x:auto; padding-top:4px; }
+.bar-strip .bar{ flex:0 0 auto; width:14px; min-height:2px; border-radius:2px 2px 0 0; cursor:pointer; }
+.bar-strip .bar.sel{ outline:2px solid var(--text); outline-offset:1px; }
+
+.bigbar-wrap{ overflow-x:auto; }
+.bigbar-track{ display:flex; align-items:flex-end; gap:8px; height:150px; padding-top:10px; min-width:max-content; }
+.bigbar-col{ display:flex; flex-direction:column; align-items:center; gap:4px; flex:0 0 auto; width:34px; cursor:pointer; }
+.bigbar-col .bar{ width:20px; border-radius:3px 3px 0 0; }
+.bigbar-col .lbl{ font-size:0.62rem; color:var(--muted); writing-mode:vertical-rl; text-orientation:mixed; height:46px; }
+.bigbar-col .val{ font-family:var(--mono); font-size:0.62rem; color:var(--text-2); }
+.bigbar-col.sel .bar{ outline:2px solid var(--text); outline-offset:1px; }
+
+table.contrib{ width:100%; border-collapse:collapse; font-size:0.76rem; margin-bottom:10px; }
+table.contrib th, table.contrib td{ text-align:right; padding:4px 6px; border-bottom:1px solid var(--border); font-variant-numeric:tabular-nums; font-family:var(--mono); }
+table.contrib th{ font-family:var(--sans); color:var(--muted); font-weight:600; text-align:right; }
+table.contrib td:first-child, table.contrib th:first-child{ text-align:left; font-family:var(--sans); }
+
+.pool-box{ display:inline-block; }
+.pool-box table{ border-collapse:collapse; }
+.pool-box td{ width:42px; height:36px; text-align:center; font-family:var(--mono); font-size:0.78rem; border:1px solid var(--border); font-variant-numeric:tabular-nums; }
+.pool-box td.max{ background:var(--accent); color:var(--accent-ink); font-weight:700; }
+
+.shape-strip{ display:flex; gap:0; overflow-x:auto; margin-top:24px; border:1px solid var(--border); border-radius:10px; }
+.shape-strip .cell{ flex:0 0 auto; padding:10px 14px; border-right:1px solid var(--border); font-size:0.72rem; min-width:84px; }
+.shape-strip .cell:last-child{ border-right:none; }
+.shape-strip .cell .nm{ color:var(--muted); font-weight:600; margin-bottom:3px; }
+.shape-strip .cell .sh{ font-family:var(--mono); color:var(--text); font-variant-numeric:tabular-nums; }
+
+footer{ margin-top:28px; font-size:0.78rem; color:var(--muted); line-height:1.6; }
+footer code{ font-family:var(--mono); background:var(--surface-2); border:1px solid var(--border); border-radius:4px; padding:1px 5px; }
+</style>
+</head>
+<body>
+
+<div class="page">
+  <h1>CNN Forward Pass</h1>
+  <p class="sub">Every tensor your <code>SimpleCNN</code> from Lesson 3 produces, laid out pixel by
+  pixel — the padding ring, the kernel sliding by its stride, and each intermediate shape in
+  between. The sample image and all weights below are fixed and <strong>untrained</strong>
+  (random, scaled like PyTorch's default init) — this is about seeing the mechanics run, not
+  about a trained model's accuracy.</p>
+
+  <div class="stage-rail" id="stageRail"></div>
+
+  <div class="viewer-grid">
+    <div class="panel" id="canvasPanel"></div>
+    <div class="panel" id="computePanel"></div>
+  </div>
+
+  <div class="shape-strip" id="shapeStrip"></div>
+
+  <footer>
+    Matches <code>lessons/lesson3_cnn_from_scratch/cnn_from_scratch.py</code>: Conv2d(3→16,k3,p1) →
+    ReLU → MaxPool2d(2) → Conv2d(16→32,k3,p1) → ReLU → MaxPool2d(2) → Flatten → Linear(2048→16) →
+    ReLU → Linear(16→10).
+  </footer>
+</div>
+
+<script>
+(function(){
+  'use strict';
+
+  /* ---------------- RNG (deterministic, so the page is stable across reloads) ---------------- */
+  function mulberry32(seed){
+    return function(){
+      seed |= 0; seed = (seed + 0x6D2B79F5) | 0;
+      let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+  const rng = mulberry32(20260305);
+  function U(scale){ return (rng()*2-1)*scale; }
+  function clamp01(v){ return Math.max(0, Math.min(1, v)); }
+  function clamp(v,lo,hi){ return Math.max(lo, Math.min(hi, v)); }
+  function fmt(v){ return (Math.round(v*1000)/1000).toFixed(3); }
+
+  /* ---------------- dims ---------------- */
+  const IN_C=3, IN_N=32, C1_OUT=16, C2_OUT=32, P1=16, P2=8;
+  const FLAT_LEN=C2_OUT*P2*P2, FC1_OUT=16, FC2_OUT=10;
+  const CLASSES=["airplane","automobile","bird","cat","deer","dog","frog","horse","ship","truck"];
+
+  /* ---------------- tensor builders ---------------- */
+  function zeros3(c,h,w){ return Array.from({length:c},()=>Array.from({length:h},()=>new Array(w).fill(0))); }
+  function zeros1(n){ return new Array(n).fill(0); }
+  function randW4(oc,ic,k,scale){
+    const w=[];
+    for(let o=0;o<oc;o++){ const a=[]; for(let i=0;i<ic;i++){ const b=[]; for(let y=0;y<k;y++){ const r=[]; for(let x=0;x<k;x++) r.push(U(scale)); b.push(r); } a.push(b); } w.push(a); }
+    return w;
+  }
+  function randW2(oc,ic,scale){ const w=[]; for(let o=0;o<oc;o++){ const a=[]; for(let i=0;i<ic;i++) a.push(U(scale)); w.push(a); } return w; }
+  function randB(n,scale){ const b=[]; for(let i=0;i<n;i++) b.push(U(scale)); return b; }
+
+  /* ---------------- sample input image: a circle on a background, 3 channels ---------------- */
+  const input = zeros3(IN_C, IN_N, IN_N);
+  (function(){
+    const c0=(IN_N-1)/2, R=10;
+    for(let y=0;y<IN_N;y++){
+      for(let x=0;x<IN_N;x++){
+        const d=Math.hypot(x-c0,y-c0);
+        const inside = d < R;
+        const n = (rng()-0.5)*0.06;
+        input[0][y][x]=clamp01((inside?0.85:0.16)+n);
+        input[1][y][x]=clamp01((inside?0.55:0.26)+n);
+        input[2][y][x]=clamp01((inside?0.20:0.74)+n);
+      }
+    }
+  })();
+
+  function pad(tensor, c, n, p){
+    const out = zeros3(c, n+2*p, n+2*p);
+    for(let ch=0; ch<c; ch++) for(let y=0;y<n;y++) for(let x=0;x<n;x++) out[ch][y+p][x+p]=tensor[ch][y][x];
+    return out;
+  }
+  function conv2d(paddedInput, cIn, cOut, k, stride, outN, weights, bias){
+    const out = zeros3(cOut, outN, outN);
+    for(let oc=0;oc<cOut;oc++){
+      for(let oy=0;oy<outN;oy++){
+        for(let ox=0; ox<outN; ox++){
+          let s = bias[oc];
+          for(let ic=0; ic<cIn; ic++){
+            for(let ky=0;ky<k;ky++){
+              for(let kx=0;kx<k;kx++){
+                s += weights[oc][ic][ky][kx] * paddedInput[ic][oy*stride+ky][ox*stride+kx];
+              }
+            }
+          }
+          out[oc][oy][ox]=s;
+        }
+      }
+    }
+    return out;
+  }
+  function reluTensor(t, c, n){
+    const out=zeros3(c,n,n);
+    for(let ch=0;ch<c;ch++) for(let y=0;y<n;y++) for(let x=0;x<n;x++) out[ch][y][x]=Math.max(0,t[ch][y][x]);
+    return out;
+  }
+  function maxpool2d(t, c, k, stride, outN){
+    const out=zeros3(c,outN,outN), argY=zeros3(c,outN,outN), argX=zeros3(c,outN,outN);
+    for(let ch=0; ch<c; ch++){
+      for(let oy=0;oy<outN;oy++){
+        for(let ox=0;ox<outN;ox++){
+          let best=-Infinity, by=0, bx=0;
+          for(let dy=0;dy<k;dy++) for(let dx=0;dx<k;dx++){
+            const v=t[ch][oy*stride+dy][ox*stride+dx];
+            if(v>best){ best=v; by=dy; bx=dx; }
+          }
+          out[ch][oy][ox]=best; argY[ch][oy][ox]=by; argX[ch][oy][ox]=bx;
+        }
+      }
+    }
+    return {out, argY, argX};
+  }
+
+  /* ---------------- full forward pass ---------------- */
+  const W1 = randW4(C1_OUT, IN_C, 3, 1/Math.sqrt(IN_C*9));
+  const B1 = randB(C1_OUT, 0.05);
+  const padded1 = pad(input, IN_C, IN_N, 1);
+  const conv1raw = conv2d(padded1, IN_C, C1_OUT, 3, 1, IN_N, W1, B1);
+  const relu1 = reluTensor(conv1raw, C1_OUT, IN_N);
+  const pool1res = maxpool2d(relu1, C1_OUT, 2, 2, P1);
+  const pool1 = pool1res.out;
+
+  const W2 = randW4(C2_OUT, C1_OUT, 3, 1/Math.sqrt(C1_OUT*9));
+  const B2 = randB(C2_OUT, 0.05);
+  const padded2 = pad(pool1, C1_OUT, P1, 1);
+  const conv2raw = conv2d(padded2, C1_OUT, C2_OUT, 3, 1, P1, W2, B2);
+  const relu2 = reluTensor(conv2raw, C2_OUT, P1);
+  const pool2res = maxpool2d(relu2, C2_OUT, 2, 2, P2);
+  const pool2 = pool2res.out;
+
+  const flat = zeros1(FLAT_LEN);
+  for(let c=0;c<C2_OUT;c++) for(let h=0;h<P2;h++) for(let w=0;w<P2;w++) flat[c*P2*P2 + h*P2 + w] = pool2[c][h][w];
+
+  const WFC1 = randW2(FC1_OUT, FLAT_LEN, 1/Math.sqrt(FLAT_LEN));
+  const BFC1 = randB(FC1_OUT, 0.05);
+  const fc1raw = zeros1(FC1_OUT);
+  for(let j=0;j<FC1_OUT;j++){ let s=BFC1[j]; for(let i=0;i<FLAT_LEN;i++) s+=WFC1[j][i]*flat[i]; fc1raw[j]=s; }
+  const reluFc1 = fc1raw.map(v=>Math.max(0,v));
+
+  const WFC2 = randW2(FC2_OUT, FC1_OUT, 1/Math.sqrt(FC1_OUT));
+  const BFC2 = randB(FC2_OUT, 0.05);
+  const fc2raw = zeros1(FC2_OUT);
+  for(let k=0;k<FC2_OUT;k++){ let s=BFC2[k]; for(let j=0;j<FC1_OUT;j++) s+=WFC2[k][j]*reluFc1[j]; fc2raw[k]=s; }
+
+  /* ---------------- color scales ---------------- */
+  function hex2rgb(h){ h=h.replace('#',''); return {r:parseInt(h.slice(0,2),16), g:parseInt(h.slice(2,4),16), b:parseInt(h.slice(4,6),16)}; }
+  function mix(h1,h2,t){ const a=hex2rgb(h1), b=hex2rgb(h2); return 'rgb('+Math.round(a.r+(b.r-a.r)*t)+','+Math.round(a.g+(b.g-a.g)*t)+','+Math.round(a.b+(b.b-a.b)*t)+')'; }
+  const SEQ_RAMP=['#cde2fb','#b7d3f6','#9ec5f4','#86b6ef','#6da7ec','#5598e7','#3987e5','#2a78d6','#256abf','#1c5cab','#184f95','#104281','#0d366b'];
+  function seqColor(t){
+    t=clamp(t,0,1); const n=SEQ_RAMP.length-1; const pos=t*n; const i0=Math.floor(pos); const i1=Math.min(n,i0+1); const f=pos-i0;
+    return mix(SEQ_RAMP[i0], SEQ_RAMP[i1], f);
+  }
+  function getTheme(){
+    const attr=document.documentElement.getAttribute('data-theme');
+    if(attr==='dark'||attr==='light') return attr;
+    return (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) ? 'dark' : 'light';
+  }
+  function divColor(t){
+    t=clamp(t,-1,1); const theme=getTheme();
+    const neutral = theme==='dark' ? '#383835' : '#f0efec';
+    const negPole = theme==='dark' ? '#3987e5' : '#184f95';
+    const posPole = theme==='dark' ? '#e66767' : '#e34948';
+    return t>=0 ? mix(neutral,posPole,t) : mix(neutral,negPole,-t);
+  }
+  function maxAbs2D(g){ let m=0; for(const row of g) for(const v of row) m=Math.max(m,Math.abs(v)); return m||1; }
+
+  /* ---------------- canvas drawing ---------------- */
+  function cellPxFor(n){ if(n>=30) return 10; if(n>=17) return 18; if(n>=12) return 20; return 38; }
+
+  function drawGrid(canvas, grid, cellPx, colorFn, origBounds){
+    const rows=grid.length, cols=grid[0].length;
+    const dpr=window.devicePixelRatio||1;
+    canvas.width=Math.round(cols*cellPx*dpr); canvas.height=Math.round(rows*cellPx*dpr);
+    canvas.style.width=(cols*cellPx)+'px'; canvas.style.height=(rows*cellPx)+'px';
+    const ctx=canvas.getContext('2d');
+    ctx.setTransform(dpr,0,0,dpr,0,0);
+    for(let y=0;y<rows;y++) for(let x=0;x<cols;x++){ ctx.fillStyle=colorFn(grid[y][x],y,x); ctx.fillRect(x*cellPx,y*cellPx,cellPx,cellPx); }
+    if(cellPx>=8){
+      ctx.strokeStyle = getComputedStyle(document.documentElement).getPropertyValue('--gridline').trim() || '#ccc';
+      ctx.lineWidth=1;
+      for(let y=0;y<=rows;y++){ ctx.beginPath(); ctx.moveTo(0,y*cellPx+0.5); ctx.lineTo(cols*cellPx,y*cellPx+0.5); ctx.stroke(); }
+      for(let x=0;x<=cols;x++){ ctx.beginPath(); ctx.moveTo(x*cellPx+0.5,0); ctx.lineTo(x*cellPx+0.5,rows*cellPx); ctx.stroke(); }
+    }
+    if(origBounds){
+      ctx.save(); ctx.strokeStyle = getTheme()==='dark' ? '#3987e5' : '#2a78d6';
+      ctx.setLineDash([5,3]); ctx.lineWidth=2;
+      ctx.strokeRect(origBounds.left*cellPx+1, origBounds.top*cellPx+1, origBounds.size*cellPx-2, origBounds.size*cellPx-2);
+      ctx.restore();
+    }
+  }
+
+  function placeOverlay(el, cellPx, top, left, size){
+    el.style.left=(left*cellPx)+'px'; el.style.top=(top*cellPx)+'px';
+    el.style.width=(size*cellPx)+'px'; el.style.height=(size*cellPx)+'px';
+    el.classList.remove('hidden');
+  }
+
+  /* ---------------- stage definitions ---------------- */
+  const STAGES=[
+    {id:'input', label:'Input', kind:'image', c:IN_C, grid:input},
+    {id:'pad1', label:'Padded', kind:'pad', c:IN_C, grid:padded1, origN:IN_N, note:'for Conv1 (kernel=3, padding=1)'},
+    {id:'conv1', label:'Conv1', kind:'conv', cIn:IN_C, cOut:C1_OUT, k:3, stride:1, outN:IN_N, inGrid:padded1, outGrid:conv1raw, W:W1, B:B1},
+    {id:'relu1', label:'ReLU', kind:'relu', c:C1_OUT, inGrid:conv1raw, outGrid:relu1},
+    {id:'pool1', label:'Pool1', kind:'pool', c:C1_OUT, k:2, stride:2, outN:P1, inGrid:relu1, outGrid:pool1, argY:pool1res.argY, argX:pool1res.argX},
+    {id:'pad2', label:'Padded', kind:'pad', c:C1_OUT, grid:padded2, origN:P1, note:'for Conv2 (kernel=3, padding=1)'},
+    {id:'conv2', label:'Conv2', kind:'conv', cIn:C1_OUT, cOut:C2_OUT, k:3, stride:1, outN:P1, inGrid:padded2, outGrid:conv2raw, W:W2, B:B2},
+    {id:'relu2', label:'ReLU', kind:'relu', c:C2_OUT, inGrid:conv2raw, outGrid:relu2},
+    {id:'pool2', label:'Pool2', kind:'pool', c:C2_OUT, k:2, stride:2, outN:P2, inGrid:relu2, outGrid:pool2, argY:pool2res.argY, argX:pool2res.argX},
+    {id:'flatten', label:'Flatten', kind:'flatten', data:flat},
+    {id:'fc1', label:'FC1', kind:'fc', nIn:FLAT_LEN, nOut:FC1_OUT, W:WFC1, B:BFC1, inData:flat, outData:fc1raw, reluOut:reluFc1, hasRelu:true},
+    {id:'fc2', label:'FC2 · Output', kind:'fc', nIn:FC1_OUT, nOut:FC2_OUT, W:WFC2, B:BFC2, inData:reluFc1, outData:fc2raw, hasRelu:false, labels:CLASSES},
+  ];
+
+  const shapeOf = {
+    input:'(3, 32, 32)', pad1:'(3, 34, 34)', conv1:'(16, 32, 32)', relu1:'(16, 32, 32)',
+    pool1:'(16, 16, 16)', pad2:'(16, 18, 18)', conv2:'(32, 16, 16)', relu2:'(32, 16, 16)',
+    pool2:'(32, 8, 8)', flatten:'(2048,)', fc1:'(16,)', fc2:'(10,)'
+  };
+
+  const stageState={};
+  function getState(s){
+    if(!stageState[s.id]){
+      const st={ channel:0, oy:0, ox:0, inspectChannel:0 };
+      if(s.kind==='fc') st.selNode = argmax(s.outData);
+      stageState[s.id]=st;
+    }
+    return stageState[s.id];
+  }
+  function argmax(arr){ let bi=0,bv=-Infinity; for(let i=0;i<arr.length;i++) if(arr[i]>bv){bv=arr[i];bi=i;} return bi; }
+
+  /* ---------------- UI chrome ---------------- */
+  const stageRail=document.getElementById('stageRail');
+  const canvasPanel=document.getElementById('canvasPanel');
+  const computePanel=document.getElementById('computePanel');
+  const shapeStrip=document.getElementById('shapeStrip');
+
+  let currentIdx=0;
+  STAGES.forEach((s,i)=>{
+    const btn=document.createElement('button');
+    btn.className='stage-pill'; btn.textContent=s.label;
+    btn.addEventListener('click', ()=>{ currentIdx=i; render(); });
+    stageRail.appendChild(btn);
+  });
+  STAGES.forEach(s=>{
+    const cell=document.createElement('div'); cell.className='cell';
+    cell.innerHTML='<div class="nm">'+s.label+'</div><div class="sh">'+shapeOf[s.id]+'</div>';
+    shapeStrip.appendChild(cell);
+  });
+
+  function stepBtn(disabled, label){ return '<button class="chip-btn" '+(disabled?'disabled':'')+'>'+label+'</button>'; }
+
+  function channelRow(count, idx, text){
+    return '<div class="row between" id="channelRowWrap"><div class="row">'+
+      stepBtn(idx<=0,'‹ Prev')+'<span class="chip-label" id="chanLabel">'+(text||('Channel '+(idx+1)+' of '+count))+'</span>'+stepBtn(idx>=count-1,'Next ›')+
+      '</div></div>';
+  }
+
+  function render(){
+    [...stageRail.children].forEach((b,i)=>b.classList.toggle('active', i===currentIdx));
+    const s=STAGES[currentIdx];
+    const st=getState(s);
+    if(s.kind==='image') renderImage(s,st);
+    else if(s.kind==='pad') renderPad(s,st);
+    else if(s.kind==='conv') renderConv(s,st);
+    else if(s.kind==='relu') renderRelu(s,st);
+    else if(s.kind==='pool') renderPool(s,st);
+    else if(s.kind==='flatten') renderFlatten(s,st);
+    else if(s.kind==='fc') renderFc(s,st);
+  }
+
+  /* ---------------- stage: input image ---------------- */
+  function renderImage(s, st){
+    const names=['R','G','B'];
+    canvasPanel.innerHTML =
+      '<h2>Input — '+shapeOf[s.id]+'</h2>'+
+      '<p class="caption">A small synthetic sample: a circle, tinted differently per color channel '+
+      '(plus a touch of noise), rendered at true 32×32 resolution so every pixel is one cell.</p>'+
+      '<div class="row"><button class="chip-btn" id="rgbBtn">True color</button>'+
+      channelRow(3, st.channel, names[st.channel]+' channel')+'</div>'+
+      '<div class="canvas-wrap"><canvas id="mainCanvas"></canvas></div>'+
+      '<p class="legend" id="legendLine"></p>';
+    const canvas=document.getElementById('mainCanvas');
+    const legend=document.getElementById('legendLine');
+    const rgbBtn=document.getElementById('rgbBtn');
+    function draw(){
+      const cellPx=cellPxFor(IN_N);
+      if((st._mode||'rgb')==='rgb'){
+        drawGrid(canvas, input[0], cellPx, (v,y,x)=>{
+          const r=Math.round(input[0][y][x]*255), g=Math.round(input[1][y][x]*255), b=Math.round(input[2][y][x]*255);
+          return 'rgb('+r+','+g+','+b+')';
+        });
+        legend.innerHTML='True-color composite of all 3 channels (R, G, B stacked). Switch to a single channel to see one color plane in isolation.';
+      } else {
+        drawGrid(canvas, input[st.channel], cellPx, v=>seqColor(v));
+        legend.innerHTML='<span class="sw" style="background:'+SEQ_RAMP[2]+'"></span>low &nbsp;→&nbsp; <span class="sw" style="background:'+SEQ_RAMP[10]+'"></span>high — single channel, 0–1 pixel intensity.';
+      }
+    }
+    rgbBtn.addEventListener('click', ()=>{ st._mode='rgb'; draw(); });
+    wireChannelRow(3, st, ()=>{ st._mode='chan'; render(); });
+    draw();
+    computePanel.innerHTML =
+      '<h2>About this sample</h2>'+
+      '<p class="caption">Shape <code style="font-family:var(--mono)">(3, 32, 32)</code> — 3 color '+
+      'channels, each a full 32×32 grid. Pixel <code style="font-family:var(--mono)">(c, 0, 0)</code> is '+
+      'the top-left corner; pixel <code style="font-family:var(--mono)">(c, 31, 31)</code> is the '+
+      'bottom-right. This is exactly the shape a <code style="font-family:var(--mono)">DataLoader</code> '+
+      'batch element has after Lesson 2\'s transforms, before batching.</p>'+
+      '<p class="caption">Values shown here are already in <code style="font-family:var(--mono)">[0,1]</code> '+
+      '(post <code style="font-family:var(--mono)">ToTensor()</code>), not yet normalized — kept simple so the '+
+      'pixel colors are directly readable.</p>';
+  }
+
+  function wireChannelRow(count, st, onChange){
+    const wrap=document.getElementById('channelRowWrap');
+    if(!wrap) return;
+    const [prevBtn, nextBtn] = wrap.querySelectorAll('.chip-btn');
+    const cb = onChange || render;
+    if(prevBtn) prevBtn.addEventListener('click', ()=>{ if(st.channel>0){ st.channel--; cb(); } });
+    if(nextBtn) nextBtn.addEventListener('click', ()=>{ if(st.channel<count-1){ st.channel++; cb(); } });
+  }
+
+  /* ---------------- stage: padding ---------------- */
+  function renderPad(s, st){
+    const n=s.origN, p=1, full=n+2*p;
+    canvasPanel.innerHTML =
+      '<h2>Padded — '+shapeOf[s.id]+'</h2>'+
+      '<p class="caption">A 1-pixel border of zeros added on every side, '+s.note+'. The dashed line '+
+      'marks where your real data ends and the padding ring begins.</p>'+
+      channelRow(s.c, st.channel)+
+      '<div class="canvas-wrap"><canvas id="mainCanvas"></canvas></div>'+
+      '<p class="legend">Inside the dashed box: real data (sequential blue scale, light = low, dark = high). '+
+      'Outside it: the zero-padding ring — always the lightest step, since its value is exactly 0.</p>';
+    wireChannelRow(s.c, st, ()=>render());
+    const canvas=document.getElementById('mainCanvas');
+    const cellPx=cellPxFor(full);
+    drawGrid(canvas, s.grid[st.channel], cellPx, v=>seqColor(v), {top:p,left:p,size:n});
+    computePanel.innerHTML =
+      '<h2>Why pad at all?</h2>'+
+      '<p class="caption">Without this ring, a 3×3 kernel can\'t be centered on the outermost real pixels — '+
+      'it would need to read cells that don\'t exist. Padding gives it something to read there (zeros), so '+
+      'the kernel can be centered on every real pixel, including the corners.</p>'+
+      '<p class="caption">Net effect with <code style="font-family:var(--mono)">kernel_size=3, padding=1</code>: '+
+      'the output comes out the <strong>same</strong> spatial size as the input — "same" padding. Flip to the '+
+      'next stage to watch the 3×3 window actually slide across this grid.</p>';
+  }
+
+  /* ---------------- stage: convolution ---------------- */
+  function renderConv(s, st){
+    const padN=s.outN+2; // padded side length (pad=1 both sides)
+    canvasPanel.innerHTML =
+      '<h2>'+s.label+' — '+shapeOf[s.id]+'</h2>'+
+      '<p class="caption">Showing output channel '+(st.channel+1)+' of '+s.cOut+'. The kernel is 3×3, '+
+      'stride 1 — each "Next" moves it exactly one stride to the right (wrapping to the next row).</p>'+
+      channelRow(s.cOut, st.channel, 'Output channel '+(st.channel+1)+' of '+s.cOut)+
+      '<p class="panel-label">Reads from — padded input:</p>'+
+      '<div class="canvas-wrap"><canvas id="mainCanvas"></canvas><div class="window-box" id="winBox"></div></div>'+
+      '<div class="row between" id="stepRowWrap" style="margin-top:10px"><div class="row">'+
+      stepBtn(false,'‹ Prev step')+'<span class="chip-label" id="posLabel"></span>'+stepBtn(false,'Next step ›')+
+      '</div></div>'+
+      '<p class="panel-label">Writes to — output channel '+(st.channel+1)+', raw (before ReLU):</p>'+
+      '<div class="canvas-wrap"><canvas id="outCanvas"></canvas><div class="window-box" id="outWinBox"></div></div>'+
+      '<p class="legend"><span class="sw" style="background:'+(getTheme()==='dark'?'#3987e5':'#184f95')+'"></span>negative &nbsp;'+
+      '<span class="sw" style="background:#f0efec;border:1px solid var(--border)"></span>zero &nbsp;'+
+      '<span class="sw" style="background:'+(getTheme()==='dark'?'#e66767':'#e34948')+'"></span>positive, in the output grid above.</p>';
+    wireChannelRow(s.cOut, st, ()=>render());
+
+    const canvas=document.getElementById('mainCanvas');
+    const cellPx=cellPxFor(padN);
+    drawGrid(canvas, s.inGrid[0], cellPx, (v,y,x)=>seqColor(avgAcrossChannels(s.inGrid,y,x)));
+    // overlay window at current output position
+    placeOverlay(document.getElementById('winBox'), cellPx, st.oy*s.stride, st.ox*s.stride, s.k);
+
+    const outN=s.outN;
+    function clampPos(){ st.oy=clamp(st.oy,0,outN-1); st.ox=clamp(st.ox,0,outN-1); }
+    clampPos();
+    document.getElementById('posLabel').textContent = 'output pixel ('+st.oy+', '+st.ox+') of '+(outN-1)+' max';
+
+    const outCanvas=document.getElementById('outCanvas');
+    const outCellPx=cellPxFor(outN);
+    const outGrid=s.outGrid[st.channel];
+    const outM=maxAbs2D(outGrid);
+    drawGrid(outCanvas, outGrid, outCellPx, v=>divColor(outM?v/outM:0));
+    placeOverlay(document.getElementById('outWinBox'), outCellPx, st.oy, st.ox, 1);
+
+    const stepBtns = document.querySelectorAll('#stepRowWrap .chip-btn');
+    const [prevStep, nextStep] = stepBtns;
+    function move(delta){
+      let flat = st.oy*outN + st.ox + delta;
+      flat = clamp(flat, 0, outN*outN-1);
+      st.oy = Math.floor(flat/outN); st.ox = flat%outN;
+      render();
+    }
+    prevStep.addEventListener('click', ()=>move(-1));
+    nextStep.addEventListener('click', ()=>move(1));
+    canvas.addEventListener('click', (e)=>{
+      const rect=canvas.getBoundingClientRect();
+      const cy=Math.floor((e.clientY-rect.top)/cellPx), cx=Math.floor((e.clientX-rect.left)/cellPx);
+      st.oy=clamp(Math.round(cy/s.stride),0,outN-1); st.ox=clamp(Math.round(cx/s.stride),0,outN-1);
+      render();
+    });
+    outCanvas.addEventListener('click', (e)=>{
+      const rect=outCanvas.getBoundingClientRect();
+      st.oy=clamp(Math.floor((e.clientY-rect.top)/outCellPx),0,outN-1);
+      st.ox=clamp(Math.floor((e.clientX-rect.left)/outCellPx),0,outN-1);
+      render();
+    });
+
+    renderConvCompute(s, st);
+  }
+  function avgAcrossChannels(tensor, y, x){
+    let sum=0; for(let c=0;c<tensor.length;c++) sum+=tensor[c][y][x];
+    return sum/tensor.length;
+  }
+
+  function renderConvCompute(s, st){
+    const oc=st.channel, oy=st.oy, ox=st.ox;
+    const outVal = s.outGrid[oc][oy][ox];
+    if(s.cIn<=3){
+      const names = s.cIn===3 ? ['R','G','B'] : null;
+      let grids='<div class="minigrid-row">';
+      let total=s.B[oc];
+      for(let ic=0; ic<s.cIn; ic++){
+        let chSum=0;
+        let rows='';
+        for(let ky=0;ky<s.k;ky++){
+          rows+='<tr>';
+          for(let kx=0;kx<s.k;kx++){
+            const pv=s.inGrid[ic][oy+ky][ox+kx];
+            const wv=s.W[oc][ic][ky][kx];
+            chSum += pv*wv;
+            rows+='<td title="x='+fmt(pv)+' · w='+fmt(wv)+'">'+fmt(pv*wv)+'</td>';
+          }
+          rows+='</tr>';
+        }
+        total+=chSum;
+        grids+='<div class="minigrid"><div class="mg-label">'+(names?names[ic]:('ch '+ic))+' · Σ='+fmt(chSum)+'</div><table>'+rows+'</table></div>';
+      }
+      grids+='</div>';
+      computePanel.innerHTML =
+        '<h2>Computing one output pixel</h2>'+
+        '<div class="formula">output[<span class="val">'+oc+'</span>][<span class="val">'+oy+'</span>][<span class="val">'+ox+'</span>]'+
+        ' = Σ<sub>c,ky,kx</sub> w·x + b[<span class="val">'+oc+'</span>]<br>= <span class="'+(outVal<0?'neg':'val')+'">'+fmt(outVal)+'</span></div>'+
+        '<p class="caption">Each cell below is <code style="font-family:var(--mono)">pixel × weight</code> for the 3×3 window '+
+        'centered at this output position, one grid per input channel. Sum every cell across all three grids, add the bias '+
+        '('+fmt(s.B[oc])+'), and you get the output value above.</p>'+
+        grids;
+    } else {
+      // many input channels: show a per-channel contribution bar, plus a detail grid for one selected channel
+      const contribs=[];
+      for(let ic=0; ic<s.cIn; ic++){
+        let chSum=0;
+        for(let ky=0;ky<s.k;ky++) for(let kx=0;kx<s.k;kx++) chSum += s.inGrid[ic][oy+ky][ox+kx]*s.W[oc][ic][ky][kx];
+        contribs.push(chSum);
+      }
+      const maxC=maxAbs2D([contribs]);
+      let bars='<div class="bar-strip">';
+      contribs.forEach((v,ic)=>{
+        const h=Math.max(2, Math.abs(v)/maxC*66);
+        const color = v>=0 ? 'var(--accent)' : 'var(--neg)';
+        bars+='<div class="bar'+(ic===st.inspectChannel?' sel':'')+'" data-ic="'+ic+'" style="height:'+h+'px;background:'+color+'" title="input channel '+ic+': '+fmt(v)+'"></div>';
+      });
+      bars+='</div>';
+      const ic=st.inspectChannel;
+      let rows='';
+      for(let ky=0;ky<s.k;ky++){
+        rows+='<tr>';
+        for(let kx=0;kx<s.k;kx++){
+          const pv=s.inGrid[ic][oy+ky][ox+kx], wv=s.W[oc][ic][ky][kx];
+          rows+='<td title="x='+fmt(pv)+' · w='+fmt(wv)+'">'+fmt(pv*wv)+'</td>';
+        }
+        rows+='</tr>';
+      }
+      computePanel.innerHTML =
+        '<h2>Computing one output pixel</h2>'+
+        '<div class="formula">output[<span class="val">'+oc+'</span>][<span class="val">'+oy+'</span>][<span class="val">'+ox+'</span>]'+
+        ' = Σ over <span class="val">'+s.cIn+'</span> input channels of (3×3 patch · 3×3 kernel) + b[<span class="val">'+oc+'</span>]<br>'+
+        '= <span class="'+(outVal<0?'neg':'val')+'">'+fmt(outVal)+'</span></div>'+
+        '<p class="caption">Each output channel sums a 3×3 dot product across <strong>all '+s.cIn+'</strong> input channels — too '+
+        'many to show as full grids at once, so here\'s each channel\'s contribution to this one output pixel. Click a bar to see '+
+        'that channel\'s 3×3 patch × kernel in detail.</p>'+
+        bars+
+        '<div class="minigrid"><div class="mg-label">input channel '+ic+' · patch × kernel</div><table>'+rows+'</table></div>';
+      computePanel.querySelectorAll('.bar').forEach(b=>{
+        b.addEventListener('click', ()=>{ st.inspectChannel=+b.dataset.ic; renderConvCompute(s, st); });
+      });
+    }
+  }
+
+  /* ---------------- stage: relu ---------------- */
+  function renderRelu(s, st){
+    canvasPanel.innerHTML =
+      '<h2>ReLU — '+shapeOf[s.id]+'</h2>'+
+      '<p class="caption">Elementwise: every negative value becomes 0, positive values pass through unchanged. '+
+      'Click any cell to compare before/after at that exact pixel.</p>'+
+      channelRow(s.c, st.channel)+
+      '<div class="canvas-wrap"><canvas id="mainCanvas"></canvas><div class="window-box" id="winBox"></div></div>'+
+      '<p class="legend"><span class="sw" style="background:'+SEQ_RAMP[2]+'"></span>low &nbsp;→&nbsp; <span class="sw" style="background:'+SEQ_RAMP[10]+'"></span>high — post-ReLU, always ≥ 0.</p>';
+    wireChannelRow(s.c, st, ()=>render());
+    const canvas=document.getElementById('mainCanvas');
+    const n=s.outGrid[0].length;
+    const cellPx=cellPxFor(n);
+    const ch=st.channel;
+    const m=maxAbs2D(s.outGrid[ch]);
+    drawGrid(canvas, s.outGrid[ch], cellPx, v=>seqColor(m?v/m:0));
+    const oy=clamp(st.oy,0,n-1), ox=clamp(st.ox,0,n-1);
+    placeOverlay(document.getElementById('winBox'), cellPx, oy, ox, 1);
+    canvas.addEventListener('click', (e)=>{
+      const rect=canvas.getBoundingClientRect();
+      st.oy=clamp(Math.floor((e.clientY-rect.top)/cellPx),0,n-1);
+      st.ox=clamp(Math.floor((e.clientX-rect.left)/cellPx),0,n-1);
+      render();
+    });
+    const before=s.inGrid[ch][oy][ox], after=s.outGrid[ch][oy][ox];
+    computePanel.innerHTML =
+      '<h2>Before / after at ('+oy+', '+ox+')</h2>'+
+      '<div class="formula">relu(x) = max(0, x)<br>'+
+      'before = <span class="'+(before<0?'neg':'val')+'">'+fmt(before)+'</span><br>'+
+      'after &nbsp;= <span class="val">'+fmt(after)+'</span></div>'+
+      '<p class="caption">'+(before<0 ? 'This value was negative, so ReLU clipped it to exactly 0 — the network '+
+      'treats "no evidence of this feature here" and "negative evidence" the same way.' :
+      'This value was already ≥ 0, so ReLU left it untouched.')+'</p>';
+  }
+
+  /* ---------------- stage: pooling ---------------- */
+  function renderPool(s, st){
+    const inN=s.inGrid[0].length;
+    canvasPanel.innerHTML =
+      '<h2>'+s.label+' — '+shapeOf[s.id]+'</h2>'+
+      '<p class="caption">2×2 window, stride 2 — each step jumps to the <em>next, non-overlapping</em> block. '+
+      'No padding, no learned weights: just the max of 4 numbers.</p>'+
+      channelRow(s.c, st.channel)+
+      '<p class="panel-label">Reads from — input to this pool:</p>'+
+      '<div class="canvas-wrap"><canvas id="mainCanvas"></canvas><div class="window-box" id="winBox"></div></div>'+
+      '<div class="row between" id="stepRowWrap" style="margin-top:10px"><div class="row">'+
+      stepBtn(false,'‹ Prev step')+'<span class="chip-label" id="posLabel"></span>'+stepBtn(false,'Next step ›')+
+      '</div></div>'+
+      '<p class="panel-label">Writes to — pooled output:</p>'+
+      '<div class="canvas-wrap"><canvas id="outCanvas"></canvas><div class="window-box" id="outWinBox"></div></div>'+
+      '<p class="legend"><span class="sw" style="background:'+SEQ_RAMP[2]+'"></span>low &nbsp;→&nbsp; <span class="sw" style="background:'+SEQ_RAMP[10]+'"></span>high, in both grids above.</p>';
+    wireChannelRow(s.c, st, ()=>render());
+    const canvas=document.getElementById('mainCanvas');
+    const cellPx=cellPxFor(inN);
+    const ch=st.channel;
+    const m=maxAbs2D(s.inGrid[ch]);
+    drawGrid(canvas, s.inGrid[ch], cellPx, v=>seqColor(m?v/m:0));
+    const outN=s.outN;
+    st.oy=clamp(st.oy,0,outN-1); st.ox=clamp(st.ox,0,outN-1);
+    placeOverlay(document.getElementById('winBox'), cellPx, st.oy*s.stride, st.ox*s.stride, s.k);
+    document.getElementById('posLabel').textContent='output pixel ('+st.oy+', '+st.ox+') of '+(outN-1)+' max';
+
+    const outCanvas=document.getElementById('outCanvas');
+    const outCellPx=cellPxFor(outN);
+    const outM=maxAbs2D(s.outGrid[ch]);
+    drawGrid(outCanvas, s.outGrid[ch], outCellPx, v=>seqColor(outM?v/outM:0));
+    placeOverlay(document.getElementById('outWinBox'), outCellPx, st.oy, st.ox, 1);
+
+    const stepBtns=document.querySelectorAll('#stepRowWrap .chip-btn');
+    const [prevStep,nextStep]=stepBtns;
+    function move(delta){ let f=st.oy*outN+st.ox+delta; f=clamp(f,0,outN*outN-1); st.oy=Math.floor(f/outN); st.ox=f%outN; render(); }
+    prevStep.addEventListener('click', ()=>move(-1));
+    nextStep.addEventListener('click', ()=>move(1));
+    canvas.addEventListener('click', (e)=>{
+      const rect=canvas.getBoundingClientRect();
+      const cy=Math.floor((e.clientY-rect.top)/cellPx), cx=Math.floor((e.clientX-rect.left)/cellPx);
+      st.oy=clamp(Math.round(cy/s.stride),0,outN-1); st.ox=clamp(Math.round(cx/s.stride),0,outN-1);
+      render();
+    });
+    outCanvas.addEventListener('click', (e)=>{
+      const rect=outCanvas.getBoundingClientRect();
+      st.oy=clamp(Math.floor((e.clientY-rect.top)/outCellPx),0,outN-1);
+      st.ox=clamp(Math.floor((e.clientX-rect.left)/outCellPx),0,outN-1);
+      render();
+    });
+
+    const by=s.argY[ch][st.oy][st.ox], bx=s.argX[ch][st.oy][st.ox];
+    let rows='';
+    for(let dy=0;dy<2;dy++){ rows+='<tr>'; for(let dx=0;dx<2;dx++){
+      const v=s.inGrid[ch][st.oy*2+dy][st.ox*2+dx];
+      const isMax = dy===by && dx===bx;
+      rows+='<td class="'+(isMax?'max':'')+'">'+fmt(v)+'</td>';
+    } rows+='</tr>'; }
+    computePanel.innerHTML =
+      '<h2>Taking the max of 4</h2>'+
+      '<div class="formula">output['+ch+']['+st.oy+']['+st.ox+'] = max of the 2×2 block below<br>= <span class="val">'+fmt(s.outGrid[ch][st.oy][st.ox])+'</span></div>'+
+      '<p class="caption">The highlighted cell is the winner — it\'s the only one of these 4 that passes a gradient '+
+      'backward through this window during training (see the MaxPool backprop note from the lesson chat).</p>'+
+      '<div class="pool-box"><table>'+rows+'</table></div>';
+  }
+
+  /* ---------------- stage: flatten ---------------- */
+  function renderFlatten(s, st){
+    canvasPanel.innerHTML =
+      '<h2>Flatten — '+shapeOf[s.id]+'</h2>'+
+      '<p class="caption">Reshaped here into 32 rows × 64 columns purely so it\'s visible — but this '+
+      '<strong>is</strong> the real memory layout: row = channel, column = that channel\'s 8×8 map read '+
+      'left-to-right, top-to-bottom. The actual tensor is one flat row of 2048 numbers in exactly this order.</p>'+
+      '<div class="canvas-wrap"><canvas id="mainCanvas"></canvas><div class="window-box" id="winBox"></div></div>'+
+      '<p class="legend">Click any cell to see which (channel, h, w) it came from and its flat index.</p>';
+    const canvas=document.getElementById('mainCanvas');
+    const cellPx=6;
+    const grid=[];
+    for(let c=0;c<C2_OUT;c++){ const row=[]; for(let i=0;i<P2*P2;i++) row.push(flat[c*P2*P2+i]); grid.push(row); }
+    const m=maxAbs2D(grid);
+    drawGrid(canvas, grid, cellPx, v=>seqColor(m?v/m:0));
+    const c0=clamp(st.oy,0,C2_OUT-1), i0=clamp(st.ox,0,P2*P2-1);
+    placeOverlay(document.getElementById('winBox'), cellPx, c0, i0, 1);
+    canvas.addEventListener('click', (e)=>{
+      const rect=canvas.getBoundingClientRect();
+      st.oy=clamp(Math.floor((e.clientY-rect.top)/cellPx),0,C2_OUT-1);
+      st.ox=clamp(Math.floor((e.clientX-rect.left)/cellPx),0,P2*P2-1);
+      render();
+    });
+    const h=Math.floor(i0/P2), w=i0%P2, flatIdx=c0*P2*P2+i0;
+    computePanel.innerHTML =
+      '<h2>Index math</h2>'+
+      '<div class="formula">flat_index = c·(H·W) + h·W + w<br>'+
+      '= '+c0+'·64 + '+h+'·8 + '+w+' = <span class="val">'+flatIdx+'</span></div>'+
+      '<p class="caption">That cell came from pooled-feature-map channel <strong>'+c0+'</strong>, spatial '+
+      'position <strong>('+h+', '+w+')</strong>, and holds value <span style="font-family:var(--mono)">'+fmt(flat[flatIdx])+'</span>. '+
+      'This is also exactly what <code style="font-family:var(--mono)">x.view(x.size(0), -1)</code> would '+
+      'produce for one image — <code style="font-family:var(--mono)">nn.Flatten()</code> never reshuffles values, '+
+      'it only relabels how they\'re indexed.</p>';
+  }
+
+  /* ---------------- stage: fully connected ---------------- */
+  function renderFc(s, st){
+    canvasPanel.innerHTML =
+      '<h2>'+s.label+' — '+shapeOf[s.id]+'</h2>'+
+      '<p class="caption">Every one of the '+s.nOut+' outputs here is a weighted sum over '+
+      '<strong>all '+s.nIn+'</strong> inputs — this is what "fully connected" means. Click a bar to see that '+
+      'node\'s own arithmetic on the right.</p>'+
+      '<div class="bigbar-wrap"><div class="bigbar-track" id="bars"></div></div>'+
+      (s.hasRelu ? '<p class="legend">Bars show the pre-ReLU value; the panel on the right also shows the post-ReLU result.</p>'
+                 : '<p class="legend">These 10 are the raw class scores ("logits") — the shape Lesson 4\'s <code style="font-family:var(--mono)">CrossEntropyLoss</code> expects, no softmax applied yet.</p>');
+    const track=document.getElementById('bars');
+    const vals=s.outData;
+    const m=maxAbs2D([vals]);
+    vals.forEach((v,i)=>{
+      const col=document.createElement('div');
+      col.className='bigbar-col'+(i===st.selNode?' sel':'');
+      const h=Math.max(2, Math.abs(v)/m*110);
+      const color = v>=0 ? 'var(--accent)' : 'var(--neg)';
+      const label = s.labels ? s.labels[i] : ('n'+i);
+      col.innerHTML='<div class="val">'+fmt(v)+'</div><div class="bar" style="height:'+h+'px;background:'+color+'"></div><div class="lbl">'+label+'</div>';
+      col.addEventListener('click', ()=>{ st.selNode=i; render(); });
+      track.appendChild(col);
+    });
+
+    const j=st.selNode, outVal=s.outData[j];
+    const terms=[];
+    for(let i=0;i<s.nIn;i++) terms.push({i, w:s.W[j][i], x:s.inData[i], p:s.W[j][i]*s.inData[i]});
+    terms.sort((a,b)=>Math.abs(b.p)-Math.abs(a.p));
+    const top=terms.slice(0,5);
+    let rows='';
+    top.forEach(t=>{ rows+='<tr><td>input '+t.i+'</td><td>'+fmt(t.x)+'</td><td>'+fmt(t.w)+'</td><td>'+fmt(t.p)+'</td></tr>'; });
+    const nodeName = s.labels ? s.labels[j] : ('node '+j);
+    computePanel.innerHTML =
+      '<h2>Node: '+nodeName+'</h2>'+
+      '<div class="formula">output['+j+'] = Σ<sub>i=0…'+(s.nIn-1)+'</sub> w[i]·x[i] + b['+j+']<br>'+
+      '= <span class="'+(outVal<0?'neg':'val')+'">'+fmt(outVal)+'</span>'+
+      (s.hasRelu ? ' &nbsp;→ ReLU →&nbsp; <span class="val">'+fmt(Math.max(0,outVal))+'</span>' : '')+
+      '</div>'+
+      '<p class="caption">Summing all '+s.nIn+' terms individually isn\'t illuminating on its own — here are the '+
+      '5 inputs whose contribution <code style="font-family:var(--mono)">w·x</code> has the largest magnitude for this node:</p>'+
+      '<table class="contrib"><tr><th>term</th><th>x</th><th>w</th><th>w·x</th></tr>'+rows+'</table>';
+  }
+
+  /* ---------------- theme change redraw ---------------- */
+  if(window.matchMedia){ window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', render); }
+  new MutationObserver(render).observe(document.documentElement, {attributes:true, attributeFilter:['data-theme']});
+
+  render();
+})();
+</script>
+</body>
+</html>

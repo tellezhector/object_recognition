@@ -63,14 +63,22 @@ from torch import nn
 class SimpleCNN(nn.Module):
     def __init__(self) -> None:
         super().__init__()
-        # TODO: define your conv blocks (nn.Conv2d, activation, nn.MaxPool2d)
-        # and your FC head (flatten + nn.Linear layers) as attributes here.
-        raise NotImplementedError
+        self.conv1 = nn.Conv2d(in_channels=3, out_channels=16, kernel_size=3, padding=1)
+        self.pool1 = nn.MaxPool2d(kernel_size=2)
+        self.conv2 = nn.Conv2d(in_channels=16, out_channels=32, kernel_size=3, padding=1)
+        self.pool2 = nn.MaxPool2d(kernel_size=2)
+        self.relu = nn.ReLU()
+        self.flatten = nn.Flatten()
+        self.fc1 = nn.Linear(32 * 8 * 8, 16)
+        self.fc2 = nn.Linear(16, 10)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        # TODO: pass x through the layers you defined above, in order, and
-        # return the final (batch, 10) tensor of class scores.
-        raise NotImplementedError
+        x = self.pool1(self.relu(self.conv1(x)))
+        x = self.pool2(self.relu(self.conv2(x)))
+        x = self.flatten(x)
+        x = self.relu(self.fc1(x))
+        x = self.fc2(x)
+        return x
 
 
 # ---------------------------------------------------------------------------

@@ -660,8 +660,8 @@ scores. Write up what worked, what didn't, and what you'd try next.
 
 - [x] Lesson 0 — Environment
 - [x] Lesson 1 — Tensors & autograd
-- [ ] Lesson 2 — Data loading
-- [ ] Lesson 3 — Build a CNN from scratch
+- [x] Lesson 2 — Data loading
+- [x] Lesson 3 — Build a CNN from scratch
 - [ ] Lesson 4 — Training loop
 - [ ] Lesson 5 — Regularization & overfitting
 - [ ] Lesson 6 — Evaluation & save/load
