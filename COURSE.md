@@ -393,6 +393,12 @@ loss curves.
 (hint: does your model have any layers that behave differently in train vs eval)? If it
 changes nothing yet, what layer would you need to add for it to matter?
 
+**Your answer:** I modified `SimpleCNN` to include 2 `BatchNorm2d` layers and one `Dropout`
+layer. During training, dropout masks some of the neurons; during eval it doesn't. During
+training, `BatchNorm2d` normalizes each pass through its layer per batch; during eval it
+doesn't compute batch statistics at all — it reuses the mean/std accumulated during
+training.
+
 ### Lesson 5 — Regularization & overfitting
 
 **Goal:** Diagnose and address overfitting.
@@ -662,7 +668,7 @@ scores. Write up what worked, what didn't, and what you'd try next.
 - [x] Lesson 1 — Tensors & autograd
 - [x] Lesson 2 — Data loading
 - [x] Lesson 3 — Build a CNN from scratch
-- [ ] Lesson 4 — Training loop
+- [x] Lesson 4 — Training loop
 - [ ] Lesson 5 — Regularization & overfitting
 - [ ] Lesson 6 — Evaluation & save/load
 - [ ] Lesson 7 — Pretrained backbones
