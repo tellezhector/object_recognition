@@ -451,6 +451,12 @@ decay — and show the gap shrink. Compare curves before/after.
 **Checkpoint:** Why does data augmentation reduce overfitting? Where in the training
 pipeline does it get applied — every epoch on the same images, or once up front?
 
+**Your answer:** Data augmentation makes it so the model doesn't see the exact same
+image during training, making it difficult to memorize the labels. It's applied inside
+the `Dataset`'s `transform`, which reruns on every access to an image (via
+`__getitem__`) rather than once up front — so each epoch, the same underlying image
+gets a freshly randomized crop/flip.
+
 ### Lesson 6 — Evaluation & save/load
 
 **Goal:** Properly evaluate a model and be able to reuse it later.
@@ -669,7 +675,7 @@ scores. Write up what worked, what didn't, and what you'd try next.
 - [x] Lesson 2 — Data loading
 - [x] Lesson 3 — Build a CNN from scratch
 - [x] Lesson 4 — Training loop
-- [ ] Lesson 5 — Regularization & overfitting
+- [x] Lesson 5 — Regularization & overfitting
 - [ ] Lesson 6 — Evaluation & save/load
 - [ ] Lesson 7 — Pretrained backbones
 - [ ] Lesson 8 — Fine-tuning strategies
