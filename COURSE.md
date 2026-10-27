@@ -452,7 +452,7 @@ decay — and show the gap shrink. Compare curves before/after.
 pipeline does it get applied — every epoch on the same images, or once up front?
 
 **Your answer:** Data augmentation makes it so the model doesn't see the exact same
-image during training, making it difficult to memorize the labels. It's applied inside
+image during training twice, making it difficult to memorize the labels. It's applied inside
 the `Dataset`'s `transform`, which reruns on every access to an image (via
 `__getitem__`) rather than once up front — so each epoch, the same underlying image
 gets a freshly randomized crop/flip.
@@ -464,6 +464,49 @@ gets a freshly randomized crop/flip.
 **Concepts:** confusion matrix, per-class accuracy, `torch.save`/`torch.load`,
 `state_dict()` vs saving the whole model, inference mode.
 
+**What are these, actually?**
+
+1. **A confusion matrix breaks a single accuracy number into *which* mistakes get made.**
+   It's a `num_classes x num_classes` grid where entry `[true_label][predicted_label]`
+   counts how many test examples with that true label got that prediction. A perfect
+   model has all its mass on the diagonal (`true == predicted`); every off-diagonal entry
+   is a specific, nameable kind of error — e.g. "37 cats predicted as dogs" — instead of
+   one aggregate score that hides which classes the model actually struggles to tell
+   apart.
+
+2. **Per-class accuracy is a row-wise summary of that same matrix.** For a given true
+   class, dividing its diagonal entry (i.e.
+   the entry where the prediction matches the true class) by the row's total (all examples with that true
+   label) gives that class's own accuracy. A model can post a strong overall accuracy
+   while quietly doing poorly on one or two classes — overall accuracy averages that away;
+   per-class accuracy surfaces it.
+
+3. **`torch.save`/`torch.load` are generic object serialization**, not something
+   PyTorch-model-specific — under the hood they're built on Python's `pickle`, so in
+   principle you could save almost any Python object. What you choose to hand them is
+   the actual design decision (see point 4).
+
+4. **`state_dict()` vs. saving the whole model is "data" vs. "data + code."** A
+   `state_dict()` is just an `OrderedDict` mapping each layer's name to its learned
+   tensor values (weights/biases/running BatchNorm stats) — no architecture, no class
+   definition, nothing executable. Saving the whole model (`torch.save(model, ...)`)
+   pickles the live Python object itself, including a reference to its class — which
+   means loading it back later requires that exact class to still be importable,
+   unchanged, in the same module path. If you refactor `SimpleCNN`, rename the file it
+   lives in, or load the checkpoint in a different script, a saved whole-model file can
+   silently break or load the wrong thing; a `state_dict()` just needs you to
+   re-instantiate the same architecture yourself and call `load_state_dict()` — explicit,
+   and robust to code changes elsewhere.
+
+5. **Inference mode means "I'm only computing outputs, not training."** You've already
+   met the two pieces separately: `model.eval()` (Lesson 4) switches train/eval-sensitive
+   layers like `Dropout`/`BatchNorm` to their inference behavior, and `torch.no_grad()`
+   (Lesson 1) skips building the autograd graph since you won't call `.backward()`. Doing
+   inference on a loaded checkpoint means both: `.eval()` so the model behaves the way it
+   did when you measured its accuracy, and `no_grad()` so you're not wasting memory/compute
+   tracking gradients you'll never use. (Newer PyTorch also has `torch.inference_mode()`,
+   a stricter/faster variant of `no_grad()` for exactly this use case.)
+
 **Exercise:** Compute a confusion matrix on the CIFAR-10 test set and identify your
 model's most-confused class pair. Save the model's `state_dict`, then write a **separate**
 script that reconstructs the architecture, loads the weights, and classifies a single new
@@ -471,6 +514,9 @@ image end-to-end (load → transform → predict → print label).
 
 **Checkpoint:** Why is saving `state_dict()` generally preferred over saving the whole
 model object with `torch.save(model, ...)`?
+
+**Your answer:** Because it makes it somewhat independent from the classes and import
+paths which could change when iterating on the code.
 
 ---
 
@@ -676,7 +722,7 @@ scores. Write up what worked, what didn't, and what you'd try next.
 - [x] Lesson 3 — Build a CNN from scratch
 - [x] Lesson 4 — Training loop
 - [x] Lesson 5 — Regularization & overfitting
-- [ ] Lesson 6 — Evaluation & save/load
+- [x] Lesson 6 — Evaluation & save/load
 - [ ] Lesson 7 — Pretrained backbones
 - [ ] Lesson 8 — Fine-tuning strategies
 - [ ] Lesson 9 — Custom datasets from image folders
