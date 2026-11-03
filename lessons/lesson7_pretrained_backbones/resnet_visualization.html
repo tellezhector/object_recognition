@@ -63,15 +63,21 @@
   .swatch{width:18px; height:3px; display:inline-block; border-radius:2px;}
   footer{color:var(--muted); font-size:0.82rem; margin-top:40px;}
   .math{
-    display:block; overflow-x:auto; margin:10px 0; padding:12px 16px;
-    background:var(--box); border-radius:8px; font-family:Georgia,"Times New Roman",serif;
-    font-size:1.08rem; line-height:1.7; text-align:center; color:var(--text);
-    white-space:nowrap;
+    display:block; overflow-x:auto; margin:10px 0; padding:14px 16px;
+    background:var(--box); border-radius:8px; text-align:center; font-size:1.05rem;
   }
-  .math sub, .math sup{font-size:0.65em;}
-  .math.result{font-weight:700; font-size:1.15rem;}
-  .math + .math{margin-top:-14px;}
+  .math + .math{margin-top:-6px;}
+  .math.result{font-weight:700;}
 </style>
+<script>
+  window.MathJax = {
+    tex: {
+      inlineMath: [['$', '$'], ['\\(', '\\)']],
+      displayMath: [['$$', '$$'], ['\\[', '\\]']]
+    }
+  };
+</script>
+<script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-chtml.js"></script>
 </head>
 <body>
 <div class="wrap">
@@ -100,45 +106,51 @@
   <div class="panel">
     <p style="margin-bottom:8px;"><strong>Symbols used on this page</strong></p>
     <p style="font-size:0.88rem; color:var(--muted); margin-bottom:6px;">
-      <code>x</code> — the input to whichever block is currently being discussed (not
+      $x$ — the input to whichever block is currently being discussed (not
       necessarily the whole network's input image — just "what this block receives").
     </p>
     <p style="font-size:0.88rem; color:var(--muted); margin-bottom:6px;">
-      <code>y</code> — that same block's output: <code>y = x + F(x)</code> (then
-      usually passed through a final ReLU).
+      $y$ — that same block's output: $y = x + F(x)$ (then usually passed through a
+      final ReLU).
     </p>
     <p style="font-size:0.88rem; color:var(--muted); margin-bottom:6px;">
-      <code>F</code> — the residual branch: the specific stack of weight layers inside
+      $F$ — the residual branch: the specific stack of weight layers inside
       <em>one</em> block (Conv→BN→ReLU→Conv→BN, see section 3) that gets added to
-      <code>x</code>. Every block has its own <code>F</code>, with its own learned
-      weights — it's a placeholder name for "this block's conv layers," not one fixed
-      function shared by the whole network.
+      $x$. Every block has its own $F$, with its own learned weights — it's a
+      placeholder name for "this block's conv layers," not one fixed function shared by
+      the whole network.
     </p>
     <p style="font-size:0.88rem; color:var(--muted); margin-bottom:6px;">
-      <code>L</code> — the loss: the single scalar at the very end of the <em>entire</em>
+      $L$ — the loss: the single scalar at the very end of the <em>entire</em>
       network (after every block, pooling, and the classification head) that training
-      minimizes. Computed once per forward pass, not once per block — the same
-      <code>L</code> from Lesson 4's <code>CrossEntropyLoss</code>. Strictly, "L" is a
-      number, but writing <code>∂L/∂x</code> only makes sense by treating it as the
-      <em>output</em> of a function of <code>x</code> (everything downstream, composed
-      together) — same loose convention as writing <code>dKE/dv</code> for kinetic
-      energy <code>KE = ½mv²</code>: one symbol doing double duty as "the formula" and
-      "the value you get out of it."
+      minimizes. Computed once per forward pass, not once per block — the same $L$
+      from Lesson 4's <code>CrossEntropyLoss</code>. Strictly, "$L$" is a number, but
+      writing $\frac{\partial L}{\partial x}$ only makes sense by treating it as the
+      <em>output</em> of a function of $x$ (everything downstream, composed together)
+      — same loose convention as writing $\frac{dKE}{dv}$ for kinetic energy
+      $KE = \frac{1}{2}mv^2$: one symbol doing double duty as "the formula" and "the
+      value you get out of it." As a function of whichever block's $x$ you're looking
+      at, its type signature is $\mathbb{R}^n \to \mathbb{R}$ — it eats that block's
+      input (an $n$-dimensional vector/tensor) and returns one real number. That's also
+      why $\frac{\partial L}{\partial x}$ is a <em>vector</em> (one number per
+      coordinate of $x$, not a full matrix) — contrast with $F$ below, which maps
+      $\mathbb{R}^n \to \mathbb{R}^n$ and so has a full Jacobian <em>matrix</em> for a
+      derivative.
     </p>
     <p style="font-size:0.88rem; color:var(--muted); margin-bottom:6px;">
-      <code>I</code> — the identity matrix: the "do nothing" operator. Multiplying
-      anything by <code>I</code> returns that same thing, unchanged.
+      $I$ — the identity matrix: the "do nothing" operator. Multiplying anything by
+      $I$ returns that same thing, unchanged.
     </p>
     <p style="font-size:0.88rem; color:var(--muted); margin-bottom:6px;">
-      <code>J</code> (also written <code>∂F/∂x</code>) — the Jacobian of <code>F</code>:
-      the matrix of <code>F</code>'s own partial derivatives, i.e. how much each output
-      of <code>F</code> moves when each input to <code>F</code> is wiggled.
+      $J$ (also written $\frac{\partial F}{\partial x}$) — the Jacobian of $F$: the
+      matrix of $F$'s own partial derivatives, i.e. how much each output of $F$ moves
+      when each input to $F$ is wiggled.
     </p>
     <p style="font-size:0.88rem; color:var(--muted); margin-bottom:0;">
-      <code>r</code>, <code>N</code>, <code>k</code> — only used in the toggle demo in
-      sections 1-2: <code>r=0.6</code> is a made-up stand-in for "how much a typical
-      weight path shrinks gradient," <code>N=4</code> is the toy network's block count,
-      and <code>k</code> is how many blocks you've set to "weight path" in the toggle.
+      $r$, $N$, $k$ — only used in the toggle demo in sections 1-2: $r=0.6$ is a
+      made-up stand-in for "how much a typical weight path shrinks gradient," $N=4$
+      is the toy network's block count, and $k$ is how many blocks you've set to
+      "weight path" in the toggle.
     </p>
   </div>
 
@@ -217,15 +229,15 @@
     </svg>
 
     <div class="legend">
-      <span><span class="swatch" style="background:var(--weight)"></span> weight path (F): multiplies gradient by its Jacobian, assume ≈ r = 0.6 per block</span>
+      <span><span class="swatch" style="background:var(--weight)"></span> weight path ($F$): multiplies gradient by its Jacobian, assume ≈ $r = 0.6$ per block</span>
       <span><span class="swatch" style="background:var(--skip)"></span> identity / skip path: multiplies gradient by exactly 1</span>
     </div>
 
     <h2 style="margin-top:28px;">2. Pick a route at each block — the hop count never changes</h2>
     <p style="margin-top:-4px; font-size:0.92rem;">
-      Click a block to flip which route is highlighted for it. There are
-      2<sup>4</sup> = 16 such combinations in total (this is the "ensemble of paths"
-      view of a ResNet) — this toggle just lets you walk through a few of them.
+      Click a block to flip which route is highlighted for it. There are $2^4 = 16$
+      such combinations in total (this is the "ensemble of paths" view of a ResNet) —
+      this toggle just lets you walk through a few of them.
     </p>
 
     <div class="controls" id="controls"></div>
@@ -235,15 +247,15 @@
 
   <div class="callout">
     <b>The actual point</b>
-    No matter which buttons you press, the path from <code>x</code> to <code>L</code> is
-    always 4 hops — skip connections don't shorten that. What they add is a second edge
-    at every hop whose derivative is exactly 1 instead of &lt;1. The real gradient
-    reaching <code>x</code> is the sum over <em>all 16</em> combinations, not just the
-    one you've selected — and crucially, the all-skip combination (press every button to
-    "skip") contributes a term of exactly 1, independent of depth. Make the network 50
-    blocks deep instead of 4, and that term is still exactly 1 — it's the one path in
-    the sum that never vanishes, which is what keeps the whole sum from vanishing even
-    as the mostly-weight-path terms shrink toward zero.
+    No matter which buttons you press, the path from $x$ to $L$ is always 4 hops —
+    skip connections don't shorten that. What they add is a second edge at every hop
+    whose derivative is exactly $1$ instead of $<1$. The real gradient reaching $x$
+    is the sum over <em>all 16</em> combinations, not just the one you've selected —
+    and crucially, the all-skip combination (press every button to "skip") contributes
+    a term of exactly $1$, independent of depth. Make the network 50 blocks deep
+    instead of 4, and that term is still exactly $1$ — it's the one path in the sum
+    that never vanishes, which is what keeps the whole sum from vanishing even as the
+    mostly-weight-path terms shrink toward zero.
   </div>
 
   <h2>3. Zooming into one block</h2>
@@ -263,7 +275,7 @@
       <text x="260" y="40" text-anchor="middle" font-size="11" fill="var(--weight)">residual branch F(x)</text>
 
       <path d="M40,110 L110,80" stroke="var(--weight)" stroke-width="2" fill="none"/>
-      <path d="M305,80 L440,80 L470,110" stroke="var(--weight)" stroke-width="2" fill="none"/>
+      <path d="M410,80 L440,80 L470,110" stroke="var(--weight)" stroke-width="2" fill="none"/>
 
       <!-- identity branch -->
       <path d="M40,110 C150,170 350,170 460,130" stroke="var(--skip)" stroke-width="2" stroke-dasharray="6 5" fill="none"/>
@@ -282,30 +294,32 @@
       <text x="720" y="140" text-anchor="middle" font-size="11" fill="var(--text)">x + F(x), activated</text>
     </svg>
     <p style="font-size:0.9rem; margin-top:4px;">
-      <code>y = ReLU(x + F(x))</code>. Differentiating: <code>∂y/∂x = ∂F/∂x + I</code>
-      (ignoring the outer ReLU for a block where it's active). That <code>+ I</code> is
-      the dashed line — a literal identity matrix added into the Jacobian at every
-      single block, regardless of how deep the network is.
+      $y = \text{ReLU}(x + F(x))$. Differentiating:
+      $\dfrac{\partial y}{\partial x} = \dfrac{\partial F}{\partial x} + I$ (ignoring
+      the outer ReLU for a block where it's active). That $+\,I$ is the dashed line —
+      a literal identity matrix added into the Jacobian at every single block,
+      regardless of how deep the network is.
     </p>
     <p style="font-size:0.88rem; color:var(--muted); margin-top:-4px;">
-      In plain terms, for a single number instead of a tensor: if
-      <code>y = x + F(x)</code>, basic calculus says
-      <code>dy/dx = dF(x)/dx + dx/dx = F'(x) + 1</code> — derivative of a sum is the sum
-      of derivatives, nothing more exotic than that. <code>I</code> is just the
-      tensor/matrix version of that "+1": wiggling <code>x</code> directly changes
-      <code>y</code> by the same wiggle, dimension for dimension, since <code>x</code>
-      is literally added into <code>y</code> unchanged.
+      In plain terms, for a single number instead of a tensor: if $y = x + F(x)$,
+      basic calculus says
+      $\dfrac{dy}{dx} = \dfrac{dF(x)}{dx} + \dfrac{dx}{dx} = F'(x) + 1$ — derivative of
+      a sum is the sum of derivatives, nothing more exotic than that. $I$ is just the
+      tensor/matrix version of that "+1": wiggling $x$ directly changes $y$ by the
+      same wiggle, dimension for dimension, since $x$ is literally added into $y$
+      unchanged.
     </p>
   </div>
 
   <h2>4. Why this doesn't happen in a plain (non-residual) CNN</h2>
   <p>
-    In a plain stack of conv blocks, each block's Jacobian is <code>∂F/∂x</code> only —
-    there is no <code>+ I</code> term. The gradient reaching the input is a product of
-    N of these Jacobians with no alternative route, so if each one has norm r &lt; 1,
-    the product shrinks as r<sup>N</sup> and nothing stops it from vanishing as N grows.
-    The skip connection doesn't reduce N — it just guarantees that one term in the
-    expanded sum of paths is never part of that shrinking product.
+    In a plain stack of conv blocks, each block's Jacobian is
+    $\dfrac{\partial F}{\partial x}$ only — there is no $+\,I$ term. The gradient
+    reaching the input is a product of $N$ of these Jacobians with no alternative
+    route, so if each one has norm $r < 1$, the product shrinks as $r^N$ and nothing
+    stops it from vanishing as $N$ grows. The skip connection doesn't reduce $N$ — it
+    just guarantees that one term in the expanded sum of paths is never part of that
+    shrinking product.
   </p>
 
   <h2>5. Does training "skip" the block — forward, backward, or both?</h2>
@@ -317,18 +331,18 @@
   </p>
   <p>
     <strong>Forward pass:</strong> for every single example, every single block
-    computes <code>F(x)</code> in full (both convs, both BatchNorms, the inner ReLU)
-    <em>and</em> passes <code>x</code> through unchanged, then adds them:
-    <code>y = F(x) + x</code>. The block's weight layers always run — "skip
-    connection" describes the wiring (<code>x</code> has a route around the block), not a runtime
-    choice to bypass it.
+    computes $F(x)$ in full (both convs, both BatchNorms, the inner ReLU) <em>and</em>
+    passes $x$ through unchanged, then adds them: $y = F(x) + x$. The block's weight
+    layers always run — "skip connection" describes the wiring ($x$ has a route
+    around the block), not a runtime choice to bypass it.
   </p>
   <p>
     <strong>Backward pass:</strong> gradient flows through <em>both</em> branches,
     every time, and the two contributions are added:
-    <code>∂L/∂x = ∂L/∂y · (∂F/∂x + I)</code> — (gradient through the conv layers)
-    plus (gradient passed straight through, unchanged). Nothing is dropped here
-    either.
+    $\dfrac{\partial L}{\partial x} = \dfrac{\partial L}{\partial y} \cdot
+    \left(\dfrac{\partial F}{\partial x} + I\right)$ — (gradient through the conv
+    layers) plus (gradient passed straight through, unchanged). Nothing is dropped
+    here either.
   </p>
   <p style="font-size:0.88rem; color:var(--muted); margin-top:-4px;">
     "Downstream" and "upstream" just mean "which way along the arrow in section 1."
@@ -340,106 +354,145 @@
   </p>
   <p style="font-size:0.88rem; color:var(--muted); margin-top:-4px;">
     Backprop runs right to left: it starts at the loss and hands each block a number
-    that says "here's how much the loss changes per unit change in your output" — that
-    is <code>∂L/∂y</code>, and it comes from downstream (the block to this one's right,
-    and ultimately the loss itself), since those are the only things standing between
-    this block's output <code>y</code> and the loss <code>L</code>. This block's job is
-    to convert that into "here's how much the loss changes per unit change in
-    <em>my</em> input" — <code>∂L/∂x</code> — and hand that further upstream, to the
-    block on its left. <code>(∂F/∂x + I)</code>, from the "plain terms" note in section
-    3, is the conversion factor. Read the whole line as: "what I pass upstream equals
-    what I received from downstream, times my own local derivative."
+    that says "here's how much the loss changes per unit change in your output" —
+    that is $\dfrac{\partial L}{\partial y}$, and it comes from downstream (the block
+    to this one's right, and ultimately the loss itself), since those are the only
+    things standing between this block's output $y$ and the loss $L$. This block's
+    job is to convert that into "here's how much the loss changes per unit change in
+    <em>my</em> input" — $\dfrac{\partial L}{\partial x}$ — and hand that further
+    upstream, to the block on its left.
+    $\left(\dfrac{\partial F}{\partial x} + I\right)$, from the "plain terms" note in
+    section 3, is the conversion factor. Read the whole line as: "what I pass
+    upstream equals what I received from downstream, times my own local derivative."
   </p>
 
   <details style="margin: -4px 0 14px;">
     <summary style="cursor:pointer; font-size:0.9rem;">
-      Formal proof of <code>∂L/∂x = ∂L/∂y · (∂F/∂x + I)</code>
+      Formal proof of $\dfrac{\partial L}{\partial x} = \dfrac{\partial L}{\partial y}
+      \cdot \left(\dfrac{\partial F}{\partial x} + I\right)$
     </summary>
     <div style="font-size:0.95rem; margin-top:10px;">
       <p>
-        Setup: <code>x, y ∈ ℝ<sup>n</sup></code>, <code>y = x + F(x)</code> for
-        differentiable <code>F: ℝ<sup>n</sup> → ℝ<sup>n</sup></code>, and <code>L</code>
-        is a scalar depending on <code>x</code> only <em>through</em> <code>y</code>
-        (everything downstream of this block is already folded into "how <code>L</code>
-        depends on <code>y</code>").
+        Setup: $x, y \in \mathbb{R}^n$, $y = x + F(x)$ for differentiable
+        $F: \mathbb{R}^n \to \mathbb{R}^n$, and $L$ is a scalar depending on $x$ only
+        <em>through</em> $y$ (everything downstream of this block is already folded
+        into "how $L$ depends on $y$").
       </p>
 
-      <p><strong>Step 1 — differentiate <code>y</code> coordinate-wise.</strong>
-        For each <code>j</code>: y<sub>j</sub> = x<sub>j</sub> + F<sub>j</sub>(x), so by
-        the sum rule:</p>
+      <p><strong>Step 1 — differentiate $y$ coordinate-wise.</strong>
+        For each $j$: $y_j = x_j + F_j(x)$, so by the sum rule:</p>
       <div class="math">
-        dy<sub>j</sub> &nbsp;=&nbsp; dx<sub>j</sub> + Σ<sub>i</sub> (∂F<sub>j</sub>/∂x<sub>i</sub>) dx<sub>i</sub>
+        $$ dy_j = dx_j + \sum_i \frac{\partial F_j}{\partial x_i}\, dx_i $$
       </div>
 
-      <p><strong>Step 2 — chain rule for <code>L</code>.</strong> <code>L</code>
-        depends on <code>x</code> only via <code>y</code>, so:</p>
+      <p><strong>Step 2 — chain rule for $L$.</strong> $L$ depends on $x$ only via
+        $y$, so:</p>
       <div class="math">
-        dL &nbsp;=&nbsp; Σ<sub>j</sub> (∂L/∂y<sub>j</sub>) dy<sub>j</sub>
+        $$ dL = \sum_j \frac{\partial L}{\partial y_j}\, dy_j $$
       </div>
 
       <p><strong>Step 3 — substitute Step 1 into Step 2</strong> and group every term
-        by which <code>dx<sub>i</sub></code> it multiplies:</p>
+        by which $dx_i$ it multiplies:</p>
       <div class="math">
-        dL &nbsp;=&nbsp; Σ<sub>j</sub> (∂L/∂y<sub>j</sub>) [ dx<sub>j</sub> + Σ<sub>i</sub> (∂F<sub>j</sub>/∂x<sub>i</sub>) dx<sub>i</sub> ]
-      </div>
-      <div class="math">
-        &nbsp;&nbsp;=&nbsp; Σ<sub>i</sub> &#91; (∂L/∂y<sub>i</sub>) + Σ<sub>j</sub> (∂L/∂y<sub>j</sub>)(∂F<sub>j</sub>/∂x<sub>i</sub>) &#93; dx<sub>i</sub>
+        $$
+        \begin{aligned}
+        dL &= \sum_j \frac{\partial L}{\partial y_j}\left[ dx_j + \sum_i \frac{\partial F_j}{\partial x_i} dx_i \right] \\
+           &= \sum_i \left[ \frac{\partial L}{\partial y_i} + \sum_j \frac{\partial L}{\partial y_j}\frac{\partial F_j}{\partial x_i} \right] dx_i
+        \end{aligned}
+        $$
       </div>
 
       <p><strong>Step 4 — match coefficients.</strong> By definition
-        dL = Σ<sub>i</sub> (∂L/∂x<sub>i</sub>) dx<sub>i</sub>. The <code>x<sub>i</sub></code>
-        are independent variables, so the two expressions for <code>dL</code> can only
-        agree for every possible <code>dx</code> if the coefficients match term by
-        term:</p>
+        $dL = \sum_i \dfrac{\partial L}{\partial x_i} dx_i$. The $x_i$ are independent
+        variables, so the two expressions for $dL$ can only agree for every possible
+        $dx$ if the coefficients match term by term:</p>
       <div class="math">
-        ∂L/∂x<sub>i</sub> &nbsp;=&nbsp; (∂L/∂y<sub>i</sub>) + Σ<sub>j</sub> (∂L/∂y<sub>j</sub>)(∂F<sub>j</sub>/∂x<sub>i</sub>)
+        $$ \frac{\partial L}{\partial x_i} = \frac{\partial L}{\partial y_i} + \sum_j \frac{\partial L}{\partial y_j}\frac{\partial F_j}{\partial x_i} $$
       </div>
 
       <p><strong>Step 5 — recognize this as a matrix product.</strong> Write
-        <code>∂L/∂y</code> as a row vector and <code>J</code> for the Jacobian of
-        <code>F</code> (entries J<sub>ji</sub> = ∂F<sub>j</sub>/∂x<sub>i</sub>). The sum
-        Σ<sub>j</sub> (∂L/∂y<sub>j</sub>) J<sub>ji</sub> is exactly the <code>i</code>-th
-        entry of <code>(∂L/∂y)·J</code>, and (∂L/∂y<sub>i</sub>) is the <code>i</code>-th
-        entry of <code>(∂L/∂y)·I</code>. Entry by entry, that's:</p>
+        $\dfrac{\partial L}{\partial y}$ as a row vector and $J$ for the Jacobian of
+        $F$ (entries $J_{ji} = \dfrac{\partial F_j}{\partial x_i}$). The sum
+        $\sum_j \dfrac{\partial L}{\partial y_j} J_{ji}$ is exactly the $i$-th entry
+        of $\left(\dfrac{\partial L}{\partial y}\right)\cdot J$, and
+        $\dfrac{\partial L}{\partial y_i}$ is the $i$-th entry of
+        $\left(\dfrac{\partial L}{\partial y}\right)\cdot I$. Entry by entry, that's:</p>
       <div class="math result">
-        ∂L/∂x &nbsp;=&nbsp; (∂L/∂y)·I + (∂L/∂y)·J &nbsp;=&nbsp; ∂L/∂y · (∂F/∂x + I)
+        $$ \frac{\partial L}{\partial x} = \frac{\partial L}{\partial y}\cdot I + \frac{\partial L}{\partial y}\cdot J = \frac{\partial L}{\partial y}\left(\frac{\partial F}{\partial x} + I\right) $$
       </div>
 
       <p style="margin-bottom:0;">
         ∎ — exactly the line quoted above. Nothing here used any special property of
-        <code>F</code> beyond differentiability — the <code>+I</code> comes purely from
-        <code>y</code> containing an unmodified copy of <code>x</code> added into it.
-        (For a real conv block, <code>x</code> and <code>F(x)</code> are tensors, not
-        flat vectors — flatten every spatial/channel index into one long vector and the
-        exact same algebra goes through unchanged, just with more indices to sum over.)
+        $F$ beyond differentiability — the $+I$ comes purely from $y$ containing an
+        unmodified copy of $x$ added into it. (For a real conv block, $x$ and $F(x)$
+        are tensors, not flat vectors — flatten every spatial/channel index into one
+        long vector and the exact same algebra goes through unchanged, just with more
+        indices to sum over.)
       </p>
     </div>
   </details>
 
+  <div class="callout">
+    <b>Is $L$ a different loss at every block?</b>
+    No — there is exactly <strong>one</strong> loss function in the whole network,
+    computed exactly once, at the very end (one call to, say,
+    <code>CrossEntropyLoss</code> on the final logits). Writing "$L$ as a function of
+    this block's $x$" doesn't mean a separate loss exists per block — it means the
+    <em>same</em> scalar, re-expressed as a composition that happens to start partway
+    through the network instead of at the raw input image:
+  </div>
+  <div class="math">
+    $$
+    \begin{aligned}
+    g_i(y) &= g_{i+1}\big(\text{block}_{i+1}(y)\big) \\
+    g_{i+1}(y') &= g_{i+2}\big(\text{block}_{i+2}(y')\big) \\
+    &\ \ \vdots \\
+    g_{\text{last}}(\text{output}) &= \text{loss_formula}(\text{output}, \text{true_label})
+    \end{aligned}
+    $$
+  </div>
+  <p style="font-size:0.9rem;">
+    Each $g_i$ is just "everything from here to the end," nested inside the next
+    one. There's one real function at the bottom of that nesting (the actual loss
+    formula), and every $g_i$ is a different vantage point on the exact same
+    computation. The chain rule is what lets you compute $\dfrac{\partial L}{\partial
+    x}$ at any block without ever writing out that full nested composition by hand —
+    you only need the local piece
+    $\left(\dfrac{\partial F}{\partial x} + I \text{ for this block}\right)$ and
+    whatever gradient was handed to you from downstream.
+  </p>
+  <p style="font-size:0.88rem; color:var(--muted); margin-top:-4px;">
+    Worth distinguishing: there <em>is</em> a real technique that deliberately
+    attaches extra, separate loss terms at intermediate layers —
+    <strong>deep supervision</strong> (e.g. GoogLeNet's auxiliary classifiers) —
+    genuinely adding more than one loss evaluation per forward pass. That's a real,
+    different design choice, not something a standard ResNet does by default, and not
+    something this course covers — same category of "real but distinct" as
+    stochastic depth, mentioned earlier.
+  </p>
+
   <p>
     So where does the "16 paths" idea in section 2 come from, if nothing is ever
-    skipped? It's an <em>algebraic</em> fact, not a computational one. Stack N blocks
-    and the full Jacobian from output to input is a product of N matrices, each of
-    the form <code>(I + J<sub>i</sub>)</code>. Multiply that product out by hand and
-    it expands into a sum of 2<sup>N</sup> terms — one term per subset of blocks
-    whose <code>J<sub>i</sub></code> you keep, the rest replaced by <code>I</code> in
-    the expansion. PyTorch never computes this expansion, and never runs
-    2<sup>N</sup> passes — autograd just multiplies the real Jacobians once, in the
-    order the blocks actually ran, exactly as described above. The expansion is a way
-    for <em>us</em> to understand why that one multiplication doesn't vanish; the
-    toggle lets you inspect individual terms of it for intuition — it isn't
-    simulating 16 different training runs.
+    skipped? It's an <em>algebraic</em> fact, not a computational one. Stack $N$
+    blocks and the full Jacobian from output to input is a product of $N$ matrices,
+    each of the form $(I + J_i)$. Multiply that product out by hand and it expands
+    into a sum of $2^N$ terms — one term per subset of blocks whose $J_i$ you keep,
+    the rest replaced by $I$ in the expansion. PyTorch never computes this expansion,
+    and never runs $2^N$ passes — autograd just multiplies the real Jacobians once,
+    in the order the blocks actually ran, exactly as described above. The expansion
+    is a way for <em>us</em> to understand why that one multiplication doesn't
+    vanish; the toggle lets you inspect individual terms of it for intuition — it
+    isn't simulating 16 different training runs.
   </p>
   <p style="margin-bottom:0;">
     A technique that <em>does</em> literally skip a block's computation at random
     during training is <strong>stochastic depth</strong> (Huang et al., 2016) — for
-    some training batches a block is replaced with a true identity (no
-    <code>F(x)</code> computed, so there's nothing to backprop through), with
-    probability increasing for deeper blocks, and every block is used at test time.
-    It's a real, deliberate design choice built <em>on top of</em> ordinary
-    ResNets — not what happens by default, and not something this course covers, but
-    worth knowing the name of so it doesn't get conflated with vanilla skip
-    connections.
+    some training batches a block is replaced with a true identity (no $F(x)$
+    computed, so there's nothing to backprop through), with probability increasing
+    for deeper blocks, and every block is used at test time. It's a real, deliberate
+    design choice built <em>on top of</em> ordinary ResNets — not what happens by
+    default, and not something this course covers, but worth knowing the name of so
+    it doesn't get conflated with vanilla skip connections.
   </p>
 
 
