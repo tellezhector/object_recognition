@@ -1,0 +1,512 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ResNet: why skip connections help (even though hop-count doesn't change)</title>
+<style>
+  :root{
+    --bg:#f7f7f5; --panel:#ffffff; --text:#1b1b1f; --muted:#5a5a63;
+    --line:#d8d8d6; --node:#2b2b33; --weight:#c0442a; --weight-dim:#c0442a55;
+    --skip:#1c6fa5; --skip-dim:#1c6fa555; --box:#eceae6; --box-active:#f3ddd6;
+    --accent-bg:#eef3f6;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#15151a; --panel:#1d1d24; --text:#e8e8ec; --muted:#9a9aa5;
+      --line:#3a3a44; --node:#d8d8e0; --weight:#e07856; --weight-dim:#e0785655;
+      --skip:#5ab0e8; --skip-dim:#5ab0e855; --box:#2a2a33; --box-active:#3a2a28;
+      --accent-bg:#1c2630;
+    }
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0; background:var(--bg); color:var(--text);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;
+    line-height:1.55;
+  }
+  .wrap{max-width:900px; margin:0 auto; padding:28px 16px 64px;}
+  h1{font-size:1.4rem; margin:0 0 4px;}
+  h2{font-size:1.1rem; margin:40px 0 10px;}
+  .sub{color:var(--muted); margin:0 0 28px; font-size:0.95rem;}
+  p{margin:0 0 14px;}
+  .panel{
+    background:var(--panel); border:1px solid var(--line); border-radius:12px;
+    padding:18px 18px 10px; margin-bottom:18px;
+  }
+  .callout{
+    background:var(--accent-bg); border:1px solid var(--line); border-radius:10px;
+    padding:14px 16px; margin:18px 0; font-size:0.95rem;
+  }
+  .callout b{display:block; margin-bottom:4px;}
+  svg{width:100%; height:auto; display:block;}
+  .controls{display:flex; flex-wrap:wrap; gap:10px; margin:14px 0 6px;}
+  button.toggle{
+    border:1px solid var(--line); background:var(--box); color:var(--text);
+    border-radius:8px; padding:8px 12px; font-size:0.85rem; cursor:pointer;
+    font-family:inherit; text-align:left; min-width:150px;
+  }
+  button.toggle .mode{display:block; font-weight:600; margin-top:2px;}
+  button.toggle.is-weight .mode{color:var(--weight);}
+  button.toggle.is-skip .mode{color:var(--skip);}
+  .readout{
+    display:flex; gap:22px; flex-wrap:wrap; align-items:baseline;
+    background:var(--box); border-radius:8px; padding:10px 14px; margin-top:12px;
+    font-size:0.9rem;
+  }
+  .readout .num{font-size:1.3rem; font-weight:700;}
+  code{
+    background:var(--box); border-radius:4px; padding:1px 5px; font-size:0.9em;
+  }
+  .legend{display:flex; gap:18px; font-size:0.85rem; color:var(--muted); margin-top:6px; flex-wrap:wrap;}
+  .legend span{display:inline-flex; align-items:center; gap:6px;}
+  .swatch{width:18px; height:3px; display:inline-block; border-radius:2px;}
+  footer{color:var(--muted); font-size:0.82rem; margin-top:40px;}
+  .math{
+    display:block; overflow-x:auto; margin:10px 0; padding:12px 16px;
+    background:var(--box); border-radius:8px; font-family:Georgia,"Times New Roman",serif;
+    font-size:1.08rem; line-height:1.7; text-align:center; color:var(--text);
+    white-space:nowrap;
+  }
+  .math sub, .math sup{font-size:0.65em;}
+  .math.result{font-weight:700; font-size:1.15rem;}
+  .math + .math{margin-top:-14px;}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <h1>How gradients actually reach early layers in a ResNet</h1>
+  <p class="sub">Lesson 7 companion diagram — object-recognition course</p>
+
+  <div class="callout" style="margin-top:0;">
+    <b>The objection that started this page</b>
+    "It sounds like early layers are not really 'closer' in number of steps to the
+    gradient computed from the cost function" — raised while reading the Lesson 7
+    concept notes on freezing layers and skip connections. It's a fair objection:
+    counting arrows, skip connections really don't shorten the path from input to loss.
+    This page exists to show what <em>does</em> change instead.
+  </div>
+
+  <p>
+    Your objection is correct as stated: a skip connection does not make the first
+    convolutional block fewer <em>hops</em> away from the loss. Count the arrows from
+    input to loss in the diagram below — it's 4, with or without skip connections.
+    What changes isn't the hop count. It's that each hop now has <strong>two possible
+    routes</strong>, and one of the many combinations you can pick never multiplies the
+    gradient by anything smaller than 1.
+  </p>
+
+  <div class="panel">
+    <p style="margin-bottom:8px;"><strong>Symbols used on this page</strong></p>
+    <p style="font-size:0.88rem; color:var(--muted); margin-bottom:6px;">
+      <code>x</code> — the input to whichever block is currently being discussed (not
+      necessarily the whole network's input image — just "what this block receives").
+    </p>
+    <p style="font-size:0.88rem; color:var(--muted); margin-bottom:6px;">
+      <code>y</code> — that same block's output: <code>y = x + F(x)</code> (then
+      usually passed through a final ReLU).
+    </p>
+    <p style="font-size:0.88rem; color:var(--muted); margin-bottom:6px;">
+      <code>F</code> — the residual branch: the specific stack of weight layers inside
+      <em>one</em> block (Conv→BN→ReLU→Conv→BN, see section 3) that gets added to
+      <code>x</code>. Every block has its own <code>F</code>, with its own learned
+      weights — it's a placeholder name for "this block's conv layers," not one fixed
+      function shared by the whole network.
+    </p>
+    <p style="font-size:0.88rem; color:var(--muted); margin-bottom:6px;">
+      <code>L</code> — the loss: the single scalar at the very end of the <em>entire</em>
+      network (after every block, pooling, and the classification head) that training
+      minimizes. Computed once per forward pass, not once per block — the same
+      <code>L</code> from Lesson 4's <code>CrossEntropyLoss</code>. Strictly, "L" is a
+      number, but writing <code>∂L/∂x</code> only makes sense by treating it as the
+      <em>output</em> of a function of <code>x</code> (everything downstream, composed
+      together) — same loose convention as writing <code>dKE/dv</code> for kinetic
+      energy <code>KE = ½mv²</code>: one symbol doing double duty as "the formula" and
+      "the value you get out of it."
+    </p>
+    <p style="font-size:0.88rem; color:var(--muted); margin-bottom:6px;">
+      <code>I</code> — the identity matrix: the "do nothing" operator. Multiplying
+      anything by <code>I</code> returns that same thing, unchanged.
+    </p>
+    <p style="font-size:0.88rem; color:var(--muted); margin-bottom:6px;">
+      <code>J</code> (also written <code>∂F/∂x</code>) — the Jacobian of <code>F</code>:
+      the matrix of <code>F</code>'s own partial derivatives, i.e. how much each output
+      of <code>F</code> moves when each input to <code>F</code> is wiggled.
+    </p>
+    <p style="font-size:0.88rem; color:var(--muted); margin-bottom:0;">
+      <code>r</code>, <code>N</code>, <code>k</code> — only used in the toggle demo in
+      sections 1-2: <code>r=0.6</code> is a made-up stand-in for "how much a typical
+      weight path shrinks gradient," <code>N=4</code> is the toy network's block count,
+      and <code>k</code> is how many blocks you've set to "weight path" in the toggle.
+    </p>
+  </div>
+
+  <h2>1. The network, with both routes drawn</h2>
+  <div class="panel">
+    <svg viewBox="0 0 1000 300" xmlns="http://www.w3.org/2000/svg">
+      <!-- center line nodes -->
+      <!-- node x positions -->
+      <!-- 60, 280, 500, 720, 940 -->
+      <defs>
+        <marker id="arrowGrad" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto">
+          <path d="M0,0 L8,4 L0,8 Z" fill="currentColor"/>
+        </marker>
+      </defs>
+
+      <!-- direction hint -->
+      <text x="500" y="24" text-anchor="middle" font-size="13" fill="var(--muted)">
+        forward pass →   /   gradient flows backward ←
+      </text>
+
+      <!-- center line -->
+      <line x1="60" y1="150" x2="940" y2="150" stroke="var(--line)" stroke-width="2"/>
+
+      <!-- blocks: boxes (weight path) -->
+      <g id="boxes">
+        <g data-block="0">
+          <rect x="130" y="118" width="120" height="64" rx="8" fill="var(--box)" stroke="var(--weight)" stroke-width="2"/>
+          <text x="190" y="145" text-anchor="middle" font-size="11" fill="var(--text)">Block 1</text>
+          <text x="190" y="160" text-anchor="middle" font-size="9.5" fill="var(--muted)">Conv·BN·ReLU</text>
+          <text x="190" y="172" text-anchor="middle" font-size="9.5" fill="var(--muted)">Conv·BN</text>
+        </g>
+        <g data-block="1">
+          <rect x="350" y="118" width="120" height="64" rx="8" fill="var(--box)" stroke="var(--weight)" stroke-width="2"/>
+          <text x="410" y="145" text-anchor="middle" font-size="11" fill="var(--text)">Block 2</text>
+          <text x="410" y="160" text-anchor="middle" font-size="9.5" fill="var(--muted)">Conv·BN·ReLU</text>
+          <text x="410" y="172" text-anchor="middle" font-size="9.5" fill="var(--muted)">Conv·BN</text>
+        </g>
+        <g data-block="2">
+          <rect x="570" y="118" width="120" height="64" rx="8" fill="var(--box)" stroke="var(--weight)" stroke-width="2"/>
+          <text x="630" y="145" text-anchor="middle" font-size="11" fill="var(--text)">Block 3</text>
+          <text x="630" y="160" text-anchor="middle" font-size="9.5" fill="var(--muted)">Conv·BN·ReLU</text>
+          <text x="630" y="172" text-anchor="middle" font-size="9.5" fill="var(--muted)">Conv·BN</text>
+        </g>
+        <g data-block="3">
+          <rect x="790" y="118" width="120" height="64" rx="8" fill="var(--box)" stroke="var(--weight)" stroke-width="2"/>
+          <text x="850" y="145" text-anchor="middle" font-size="11" fill="var(--text)">Block 4</text>
+          <text x="850" y="160" text-anchor="middle" font-size="9.5" fill="var(--muted)">Conv·BN·ReLU</text>
+          <text x="850" y="172" text-anchor="middle" font-size="9.5" fill="var(--muted)">Conv·BN</text>
+        </g>
+      </g>
+
+      <!-- skip arcs -->
+      <g id="arcs" fill="none">
+        <path data-block="0" d="M60,150 C140,230 200,230 280,150" stroke="var(--skip)" stroke-width="2" stroke-dasharray="6 5"/>
+        <path data-block="1" d="M280,150 C360,230 420,230 500,150" stroke="var(--skip)" stroke-width="2" stroke-dasharray="6 5"/>
+        <path data-block="2" d="M500,150 C580,230 640,230 720,150" stroke="var(--skip)" stroke-width="2" stroke-dasharray="6 5"/>
+        <path data-block="3" d="M720,150 C800,230 860,230 940,150" stroke="var(--skip)" stroke-width="2" stroke-dasharray="6 5"/>
+      </g>
+
+      <!-- nodes -->
+      <g id="nodes" fill="var(--node)">
+        <circle cx="60" cy="150" r="6"/>
+        <circle cx="280" cy="150" r="6"/>
+        <circle cx="500" cy="150" r="6"/>
+        <circle cx="720" cy="150" r="6"/>
+        <circle cx="940" cy="150" r="6"/>
+      </g>
+
+      <text x="60" y="275" text-anchor="middle" font-size="12" fill="var(--text)">x</text>
+      <text x="60" y="290" text-anchor="middle" font-size="10" fill="var(--muted)">input image</text>
+      <text x="940" y="275" text-anchor="middle" font-size="12" fill="var(--text)">L</text>
+      <text x="940" y="290" text-anchor="middle" font-size="10" fill="var(--muted)">loss</text>
+      <text x="280" y="275" text-anchor="middle" font-size="10" fill="var(--muted)">y₁</text>
+      <text x="500" y="275" text-anchor="middle" font-size="10" fill="var(--muted)">y₂</text>
+      <text x="720" y="275" text-anchor="middle" font-size="10" fill="var(--muted)">y₃</text>
+    </svg>
+
+    <div class="legend">
+      <span><span class="swatch" style="background:var(--weight)"></span> weight path (F): multiplies gradient by its Jacobian, assume ≈ r = 0.6 per block</span>
+      <span><span class="swatch" style="background:var(--skip)"></span> identity / skip path: multiplies gradient by exactly 1</span>
+    </div>
+
+    <h2 style="margin-top:28px;">2. Pick a route at each block — the hop count never changes</h2>
+    <p style="margin-top:-4px; font-size:0.92rem;">
+      Click a block to flip which route is highlighted for it. There are
+      2<sup>4</sup> = 16 such combinations in total (this is the "ensemble of paths"
+      view of a ResNet) — this toggle just lets you walk through a few of them.
+    </p>
+
+    <div class="controls" id="controls"></div>
+
+    <div class="readout" id="readout"></div>
+  </div>
+
+  <div class="callout">
+    <b>The actual point</b>
+    No matter which buttons you press, the path from <code>x</code> to <code>L</code> is
+    always 4 hops — skip connections don't shorten that. What they add is a second edge
+    at every hop whose derivative is exactly 1 instead of &lt;1. The real gradient
+    reaching <code>x</code> is the sum over <em>all 16</em> combinations, not just the
+    one you've selected — and crucially, the all-skip combination (press every button to
+    "skip") contributes a term of exactly 1, independent of depth. Make the network 50
+    blocks deep instead of 4, and that term is still exactly 1 — it's the one path in
+    the sum that never vanishes, which is what keeps the whole sum from vanishing even
+    as the mostly-weight-path terms shrink toward zero.
+  </div>
+
+  <h2>3. Zooming into one block</h2>
+  <div class="panel">
+    <svg viewBox="0 0 760 220" xmlns="http://www.w3.org/2000/svg">
+      <line x1="40" y1="110" x2="720" y2="110" stroke="var(--line)" stroke-width="2"/>
+      <circle cx="40" cy="110" r="6" fill="var(--node)"/>
+      <text x="40" y="140" text-anchor="middle" font-size="11" fill="var(--text)">x</text>
+
+      <!-- weight branch -->
+      <rect x="110" y="60" width="90" height="40" rx="6" fill="var(--box)" stroke="var(--weight)" stroke-width="2"/>
+      <text x="155" y="84" text-anchor="middle" font-size="10.5" fill="var(--text)">Conv·BN</text>
+      <rect x="215" y="60" width="90" height="40" rx="6" fill="var(--box)" stroke="var(--weight)" stroke-width="2"/>
+      <text x="260" y="84" text-anchor="middle" font-size="10.5" fill="var(--text)">ReLU</text>
+      <rect x="320" y="60" width="90" height="40" rx="6" fill="var(--box)" stroke="var(--weight)" stroke-width="2"/>
+      <text x="365" y="84" text-anchor="middle" font-size="10.5" fill="var(--text)">Conv·BN</text>
+      <text x="260" y="40" text-anchor="middle" font-size="11" fill="var(--weight)">residual branch F(x)</text>
+
+      <path d="M40,110 L110,80" stroke="var(--weight)" stroke-width="2" fill="none"/>
+      <path d="M305,80 L440,80 L470,110" stroke="var(--weight)" stroke-width="2" fill="none"/>
+
+      <!-- identity branch -->
+      <path d="M40,110 C150,170 350,170 460,130" stroke="var(--skip)" stroke-width="2" stroke-dasharray="6 5" fill="none"/>
+      <text x="250" y="178" text-anchor="middle" font-size="11" fill="var(--skip)">identity (×1)</text>
+
+      <!-- sum node -->
+      <circle cx="480" cy="110" r="16" fill="var(--box)" stroke="var(--text)" stroke-width="1.5"/>
+      <text x="480" y="115" text-anchor="middle" font-size="14" fill="var(--text)">+</text>
+
+      <!-- final relu -->
+      <rect x="540" y="90" width="90" height="40" rx="6" fill="var(--box)" stroke="var(--line)" stroke-width="2"/>
+      <text x="585" y="114" text-anchor="middle" font-size="10.5" fill="var(--text)">ReLU</text>
+      <path d="M496,110 L540,110" stroke="var(--text)" stroke-width="2" fill="none"/>
+      <path d="M630,110 L720,110" stroke="var(--text)" stroke-width="2" fill="none"/>
+      <circle cx="720" cy="110" r="6" fill="var(--node)"/>
+      <text x="720" y="140" text-anchor="middle" font-size="11" fill="var(--text)">x + F(x), activated</text>
+    </svg>
+    <p style="font-size:0.9rem; margin-top:4px;">
+      <code>y = ReLU(x + F(x))</code>. Differentiating: <code>∂y/∂x = ∂F/∂x + I</code>
+      (ignoring the outer ReLU for a block where it's active). That <code>+ I</code> is
+      the dashed line — a literal identity matrix added into the Jacobian at every
+      single block, regardless of how deep the network is.
+    </p>
+    <p style="font-size:0.88rem; color:var(--muted); margin-top:-4px;">
+      In plain terms, for a single number instead of a tensor: if
+      <code>y = x + F(x)</code>, basic calculus says
+      <code>dy/dx = dF(x)/dx + dx/dx = F'(x) + 1</code> — derivative of a sum is the sum
+      of derivatives, nothing more exotic than that. <code>I</code> is just the
+      tensor/matrix version of that "+1": wiggling <code>x</code> directly changes
+      <code>y</code> by the same wiggle, dimension for dimension, since <code>x</code>
+      is literally added into <code>y</code> unchanged.
+    </p>
+  </div>
+
+  <h2>4. Why this doesn't happen in a plain (non-residual) CNN</h2>
+  <p>
+    In a plain stack of conv blocks, each block's Jacobian is <code>∂F/∂x</code> only —
+    there is no <code>+ I</code> term. The gradient reaching the input is a product of
+    N of these Jacobians with no alternative route, so if each one has norm r &lt; 1,
+    the product shrinks as r<sup>N</sup> and nothing stops it from vanishing as N grows.
+    The skip connection doesn't reduce N — it just guarantees that one term in the
+    expanded sum of paths is never part of that shrinking product.
+  </p>
+
+  <h2>5. Does training "skip" the block — forward, backward, or both?</h2>
+
+  <p>
+    No. Neither pass ever skips the block's computation. This is worth stating
+    plainly because the toggle in section 2, and the "16 combinations" framing, can
+    make it sound like training literally picks one route per block. It doesn't.
+  </p>
+  <p>
+    <strong>Forward pass:</strong> for every single example, every single block
+    computes <code>F(x)</code> in full (both convs, both BatchNorms, the inner ReLU)
+    <em>and</em> passes <code>x</code> through unchanged, then adds them:
+    <code>y = F(x) + x</code>. The block's weight layers always run — "skip
+    connection" describes the wiring (<code>x</code> has a route around the block), not a runtime
+    choice to bypass it.
+  </p>
+  <p>
+    <strong>Backward pass:</strong> gradient flows through <em>both</em> branches,
+    every time, and the two contributions are added:
+    <code>∂L/∂x = ∂L/∂y · (∂F/∂x + I)</code> — (gradient through the conv layers)
+    plus (gradient passed straight through, unchanged). Nothing is dropped here
+    either.
+  </p>
+  <p style="font-size:0.88rem; color:var(--muted); margin-top:-4px;">
+    "Downstream" and "upstream" just mean "which way along the arrow in section 1."
+    The forward pass runs input → block 1 → block 2 → … → loss, left to right.
+    <strong>Downstream</strong> of this block means anything further to the
+    <em>right</em> — closer to the loss, computed <em>after</em> this block runs.
+    <strong>Upstream</strong> means anything further to the <em>left</em> — closer to
+    the input, computed <em>before</em> this block.
+  </p>
+  <p style="font-size:0.88rem; color:var(--muted); margin-top:-4px;">
+    Backprop runs right to left: it starts at the loss and hands each block a number
+    that says "here's how much the loss changes per unit change in your output" — that
+    is <code>∂L/∂y</code>, and it comes from downstream (the block to this one's right,
+    and ultimately the loss itself), since those are the only things standing between
+    this block's output <code>y</code> and the loss <code>L</code>. This block's job is
+    to convert that into "here's how much the loss changes per unit change in
+    <em>my</em> input" — <code>∂L/∂x</code> — and hand that further upstream, to the
+    block on its left. <code>(∂F/∂x + I)</code>, from the "plain terms" note in section
+    3, is the conversion factor. Read the whole line as: "what I pass upstream equals
+    what I received from downstream, times my own local derivative."
+  </p>
+
+  <details style="margin: -4px 0 14px;">
+    <summary style="cursor:pointer; font-size:0.9rem;">
+      Formal proof of <code>∂L/∂x = ∂L/∂y · (∂F/∂x + I)</code>
+    </summary>
+    <div style="font-size:0.95rem; margin-top:10px;">
+      <p>
+        Setup: <code>x, y ∈ ℝ<sup>n</sup></code>, <code>y = x + F(x)</code> for
+        differentiable <code>F: ℝ<sup>n</sup> → ℝ<sup>n</sup></code>, and <code>L</code>
+        is a scalar depending on <code>x</code> only <em>through</em> <code>y</code>
+        (everything downstream of this block is already folded into "how <code>L</code>
+        depends on <code>y</code>").
+      </p>
+
+      <p><strong>Step 1 — differentiate <code>y</code> coordinate-wise.</strong>
+        For each <code>j</code>: y<sub>j</sub> = x<sub>j</sub> + F<sub>j</sub>(x), so by
+        the sum rule:</p>
+      <div class="math">
+        dy<sub>j</sub> &nbsp;=&nbsp; dx<sub>j</sub> + Σ<sub>i</sub> (∂F<sub>j</sub>/∂x<sub>i</sub>) dx<sub>i</sub>
+      </div>
+
+      <p><strong>Step 2 — chain rule for <code>L</code>.</strong> <code>L</code>
+        depends on <code>x</code> only via <code>y</code>, so:</p>
+      <div class="math">
+        dL &nbsp;=&nbsp; Σ<sub>j</sub> (∂L/∂y<sub>j</sub>) dy<sub>j</sub>
+      </div>
+
+      <p><strong>Step 3 — substitute Step 1 into Step 2</strong> and group every term
+        by which <code>dx<sub>i</sub></code> it multiplies:</p>
+      <div class="math">
+        dL &nbsp;=&nbsp; Σ<sub>j</sub> (∂L/∂y<sub>j</sub>) [ dx<sub>j</sub> + Σ<sub>i</sub> (∂F<sub>j</sub>/∂x<sub>i</sub>) dx<sub>i</sub> ]
+      </div>
+      <div class="math">
+        &nbsp;&nbsp;=&nbsp; Σ<sub>i</sub> &#91; (∂L/∂y<sub>i</sub>) + Σ<sub>j</sub> (∂L/∂y<sub>j</sub>)(∂F<sub>j</sub>/∂x<sub>i</sub>) &#93; dx<sub>i</sub>
+      </div>
+
+      <p><strong>Step 4 — match coefficients.</strong> By definition
+        dL = Σ<sub>i</sub> (∂L/∂x<sub>i</sub>) dx<sub>i</sub>. The <code>x<sub>i</sub></code>
+        are independent variables, so the two expressions for <code>dL</code> can only
+        agree for every possible <code>dx</code> if the coefficients match term by
+        term:</p>
+      <div class="math">
+        ∂L/∂x<sub>i</sub> &nbsp;=&nbsp; (∂L/∂y<sub>i</sub>) + Σ<sub>j</sub> (∂L/∂y<sub>j</sub>)(∂F<sub>j</sub>/∂x<sub>i</sub>)
+      </div>
+
+      <p><strong>Step 5 — recognize this as a matrix product.</strong> Write
+        <code>∂L/∂y</code> as a row vector and <code>J</code> for the Jacobian of
+        <code>F</code> (entries J<sub>ji</sub> = ∂F<sub>j</sub>/∂x<sub>i</sub>). The sum
+        Σ<sub>j</sub> (∂L/∂y<sub>j</sub>) J<sub>ji</sub> is exactly the <code>i</code>-th
+        entry of <code>(∂L/∂y)·J</code>, and (∂L/∂y<sub>i</sub>) is the <code>i</code>-th
+        entry of <code>(∂L/∂y)·I</code>. Entry by entry, that's:</p>
+      <div class="math result">
+        ∂L/∂x &nbsp;=&nbsp; (∂L/∂y)·I + (∂L/∂y)·J &nbsp;=&nbsp; ∂L/∂y · (∂F/∂x + I)
+      </div>
+
+      <p style="margin-bottom:0;">
+        ∎ — exactly the line quoted above. Nothing here used any special property of
+        <code>F</code> beyond differentiability — the <code>+I</code> comes purely from
+        <code>y</code> containing an unmodified copy of <code>x</code> added into it.
+        (For a real conv block, <code>x</code> and <code>F(x)</code> are tensors, not
+        flat vectors — flatten every spatial/channel index into one long vector and the
+        exact same algebra goes through unchanged, just with more indices to sum over.)
+      </p>
+    </div>
+  </details>
+
+  <p>
+    So where does the "16 paths" idea in section 2 come from, if nothing is ever
+    skipped? It's an <em>algebraic</em> fact, not a computational one. Stack N blocks
+    and the full Jacobian from output to input is a product of N matrices, each of
+    the form <code>(I + J<sub>i</sub>)</code>. Multiply that product out by hand and
+    it expands into a sum of 2<sup>N</sup> terms — one term per subset of blocks
+    whose <code>J<sub>i</sub></code> you keep, the rest replaced by <code>I</code> in
+    the expansion. PyTorch never computes this expansion, and never runs
+    2<sup>N</sup> passes — autograd just multiplies the real Jacobians once, in the
+    order the blocks actually ran, exactly as described above. The expansion is a way
+    for <em>us</em> to understand why that one multiplication doesn't vanish; the
+    toggle lets you inspect individual terms of it for intuition — it isn't
+    simulating 16 different training runs.
+  </p>
+  <p style="margin-bottom:0;">
+    A technique that <em>does</em> literally skip a block's computation at random
+    during training is <strong>stochastic depth</strong> (Huang et al., 2016) — for
+    some training batches a block is replaced with a true identity (no
+    <code>F(x)</code> computed, so there's nothing to backprop through), with
+    probability increasing for deeper blocks, and every block is used at test time.
+    It's a real, deliberate design choice built <em>on top of</em> ordinary
+    ResNets — not what happens by default, and not something this course covers, but
+    worth knowing the name of so it doesn't get conflated with vanilla skip
+    connections.
+  </p>
+
+
+  <footer>
+    resnet_visualization.html — generated for Lesson 7 (Pretrained backbones),
+    object-recognition course.
+  </footer>
+</div>
+
+<script>
+(function(){
+  var N = 4;
+  var state = [true, true, true, true]; // true = weight path active, false = skip
+  var r = 0.6;
+
+  var controls = document.getElementById('controls');
+  var readout = document.getElementById('readout');
+  var boxes = Array.prototype.slice.call(document.querySelectorAll('#boxes > g'));
+  var arcs = Array.prototype.slice.call(document.querySelectorAll('#arcs > path'));
+
+  function buttonFor(i){
+    var b = document.createElement('button');
+    b.className = 'toggle';
+    b.innerHTML = 'Block ' + (i+1) + '<span class="mode"></span>';
+    b.addEventListener('click', function(){
+      state[i] = !state[i];
+      render();
+    });
+    return b;
+  }
+
+  for (var i = 0; i < N; i++){
+    controls.appendChild(buttonFor(i));
+  }
+
+  function render(){
+    var k = 0; // count of weight-path hops selected
+    for (var i = 0; i < N; i++){
+      var useWeight = state[i];
+      if (useWeight) k++;
+
+      var box = boxes[i];
+      var arc = arcs[i];
+      var btn = controls.children[i];
+
+      box.querySelector('rect').setAttribute('fill', useWeight ? 'var(--box-active)' : 'var(--box)');
+      box.querySelector('rect').setAttribute('stroke-width', useWeight ? '3' : '1.5');
+      box.querySelector('rect').setAttribute('stroke', useWeight ? 'var(--weight)' : 'var(--line)');
+
+      arc.setAttribute('stroke', useWeight ? 'var(--skip-dim)' : 'var(--skip)');
+      arc.setAttribute('stroke-width', useWeight ? '1.5' : '3');
+
+      btn.classList.toggle('is-weight', useWeight);
+      btn.classList.toggle('is-skip', !useWeight);
+      btn.querySelector('.mode').textContent = useWeight ? 'weight path (F)' : 'skip path (identity)';
+    }
+
+    var magnitude = Math.pow(r, k);
+    readout.innerHTML =
+      '<div><div class="num">4</div>hops, always (input → loss)</div>' +
+      '<div><div class="num">' + k + ' / 4</div>weight-layer hops in this route</div>' +
+      '<div><div class="num">' + magnitude.toFixed(3) + '</div>gradient multiplier along this route, assuming r=0.6 per block (r<sup>' + k + '</sup>)</div>';
+  }
+
+  render();
+})();
+</script>
+
+</body>
+</html>

@@ -529,6 +529,73 @@ paths which could change when iterating on the code.
 **Concepts:** ImageNet pretraining, `torchvision.models`, feature extraction vs
 fine-tuning, freezing layers, replacing the classification head.
 
+**What do these actually mean?**
+
+1. **ImageNet pretraining means someone already spent the compute so you don't have to.**
+   ImageNet is a ~1.2M-image, 1000-class dataset. Training a ResNet on it from scratch
+   takes many GPU-hours. A "pretrained" model is one whose weights already encode
+   whatever that training run learned — edge detectors in early layers, textures and
+   parts in middle layers, more class-specific patterns near the end (the same
+   early-layers-are-generic intuition you saw building your own CNN in Lesson 3, just at
+   much greater scale and with real photos instead of 32×32 CIFAR crops).
+
+2. **`torchvision.models` hands you the architecture *and* those trained weights
+   together.** `models.resnet18(weights=...)` gives you both the class definition (same
+   idea as your `SimpleCNN`, just deeper/more refined) and an `OrderedDict` of learned
+   parameters loaded into it — the same `state_dict()` concept from Lesson 6, just
+   written by someone else's training run instead of yours.
+
+3. **A ResNet (Residual Network) is a CNN whose key trick is skip connections.** Instead
+   of each block computing `output = F(input)`, it computes `output = F(input) + input` —
+   the block's input is added back in alongside whatever the conv layers computed.
+
+   - *The problem it solves:* naively stacking more conv layers (like a deeper
+     `SimpleCNN`) tends to get *harder* to train — gradients backpropagating through
+     dozens of layers via the chain rule (Lesson 1) shrink toward zero before reaching
+     early layers ("vanishing gradients"), so those layers barely learn.
+   - *The skip connection gives gradients a shortcut:* because `output = F(input) +
+     input`, the `+ input` term passes gradient straight through unchanged during
+     `.backward()`, in addition to whatever path goes through `F`. Even a very deep
+     ResNet (18, 50, 152 layers) keeps a direct route for gradient back to early layers,
+     instead of relying only on the long multiplicative chain through every block.
+   - *Each block only has to learn a residual:* `F(input)` learns "the correction to add
+     on top of passing the input through," not the whole transformation. A block with
+     nothing useful to contribute can learn `F(input) ≈ 0` and become close to a
+     no-op, rather than actively degrading the signal — why stacking more residual
+     blocks reliably helps rather than hurts.
+   - *Otherwise it's built from parts you already know:* repeated units of `Conv2d →
+     BatchNorm2d → ReLU → Conv2d → BatchNorm2d`, with the input added back in before the
+     final `ReLU`, plus `MaxPool`/strided convs for downsampling, ending in a global pool
+     + one `Linear` head — the same pieces from Lessons 3–5, organized around the skip
+     connection and trained at ImageNet scale. `resnet18/34/50/...` differ mainly in
+     depth and whether blocks use 2 convs ("basic block") or a 1×1→3×3→1×1 "bottleneck"
+     (deeper variants), which is cheaper per layer at the same depth.
+
+4. **Feature extraction and fine-tuning are two different answers to "how much of this
+   do I let training touch?"** Feature extraction treats the pretrained network as a
+   fixed function that turns an image into a feature vector, and only trains a new layer
+   on top of those features. Fine-tuning instead keeps training some or all of the
+   pretrained weights too, letting them adjust toward your data. Lesson 7 has you do pure
+   feature extraction (freeze everything, train only the new head); Lesson 8 is where you
+   start loosening that.
+
+5. **Freezing a layer means telling autograd not to update it — not that it's "disabled."**
+   Concretely, you set `param.requires_grad = False` on that layer's parameters. The
+   forward pass still runs through it normally (you still need its output to compute
+   anything downstream), but `.backward()` won't bother computing gradients for it, and
+   your optimizer has nothing to step there even if it tried. This is the direct extension
+   of `requires_grad` from Lesson 1 — there it marked a tensor as *something to learn*,
+   here you're using the same flag to mark pretrained tensors as *not* something to learn.
+
+6. **Replacing the classification head means swapping out the last `Linear` layer only.**
+   A pretrained ResNet's final layer outputs 1000 logits — one per ImageNet class. Your
+   problem has a different number of classes (10, for Imagenette), so that last layer's
+   *shape* is simply wrong for your task — you construct a brand-new `nn.Linear` with the
+   right `out_features` and assign it in place of the old one. The new layer starts with
+   random weights (it never saw ImageNet), which is exactly why it's the one piece you
+   leave unfrozen — it's the only part of the network that actually has something to
+   learn for your task.
+
 **Exercise:** Download Imagenette. Load a pretrained ResNet (your choice of size) from
 `torchvision.models`, freeze all layers except the final FC layer, replace that layer to
 output 10 classes, and train just that layer on Imagenette.
