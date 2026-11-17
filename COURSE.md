@@ -561,8 +561,8 @@ fine-tuning, freezing layers, replacing the classification head.
    - *Each block only has to learn a residual:* `F(input)` learns "the correction to add
      on top of passing the input through," not the whole transformation. A block with
      nothing useful to contribute can learn `F(input) ≈ 0` and become close to a
-     no-op, rather than actively degrading the signal — why stacking more residual
-     blocks reliably helps rather than hurts.
+     no-op, rather than actively degrading the signal — which is why stacking more
+     residual blocks reliably helps rather than hurts.
    - *Otherwise it's built from parts you already know:* repeated units of `Conv2d →
      BatchNorm2d → ReLU → Conv2d → BatchNorm2d`, with the input added back in before the
      final `ReLU`, plus `MaxPool`/strided convs for downsampling, ending in a global pool
@@ -597,11 +597,25 @@ fine-tuning, freezing layers, replacing the classification head.
    learn for your task.
 
 **Exercise:** Download Imagenette. Load a pretrained ResNet (your choice of size) from
-`torchvision.models`, freeze all layers except the final FC layer, replace that layer to
-output 10 classes, and train just that layer on Imagenette.
+`torchvision.models`, freeze all layers except the final Fully Connected (FC)
+layer, replace that layer to output 10 classes, and train just that layer on
+Imagenette.
 
-**Checkpoint:** Why does freezing most of the network still work well, when those layers
-were trained on totally different classes than yours?
+**Checkpoint:** Why does freezing most of the network still work well for a new
+classification task, even one whose classes weren't part of the original pretraining set
+at all? (Imagenette's own classes happen to be a literal subset of ImageNet's 1000, so this
+exercise alone doesn't test the harder case — reason about the general principle.)
+
+**Your answer:** The backbone's conv layers aren't classifying anything, they're detecting
+features — early layers pick up generic things like edges/curves/shading, middle layers
+compose those into shapes, and layers closer to the head combine shapes into higher-level
+properties. The `fc` layer is the only part that actually decides a class from those
+features, which is why it's the one left unfrozen. Those lower-level "features" still
+compose any image regardless of its class, which is why they transfer reasonably well even
+to unseen categories — but that's not guaranteed if the new domain looks very different from
+natural photos (e.g. very noisy or out-of-distribution images), and this exercise alone
+doesn't show *what* each layer is actually specializing in, just that it works empirically
+here.
 
 ### Lesson 8 — Fine-tuning strategies
 
@@ -790,7 +804,7 @@ scores. Write up what worked, what didn't, and what you'd try next.
 - [x] Lesson 4 — Training loop
 - [x] Lesson 5 — Regularization & overfitting
 - [x] Lesson 6 — Evaluation & save/load
-- [ ] Lesson 7 — Pretrained backbones
+- [x] Lesson 7 — Pretrained backbones
 - [ ] Lesson 8 — Fine-tuning strategies
 - [ ] Lesson 9 — Custom datasets from image folders
 - [ ] Lesson 10 — Model comparison & error analysis

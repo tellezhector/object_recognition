@@ -17,7 +17,7 @@ from pathlib import Path
 import torch
 from torch import nn, optim
 from torch.utils.data import DataLoader
-from torchvision import datasets, transforms
+from torchvision import datasets, models, transforms
 
 # Imagenette downloads here, same convention as Lesson 2's CIFAR-10.
 # "320px" is the fastai-resized variant -- plenty of detail for a 224x224
@@ -62,6 +62,19 @@ val_dataset = datasets.Imagenette(root=DATA_DIR, split="val", size=IMAGENETTE_SI
 
 CLASSES = train_dataset.classes  # tuple of synonym-tuples, one per class
 NUM_CLASSES = len(CLASSES)
+# CLASSES in Imagenette:
+# classes=[
+#   ('tench', 'Tinca tinca'),
+#   ('English springer', 'English springer spaniel'),
+#   ('cassette player',),
+#   ('chain saw', 'chainsaw'),
+#   ('church', 'church building'),
+#   ('French horn', 'horn'),
+#   ('garbage truck', 'dustcart'),
+#   ('gas pump', 'gasoline pump', 'petrol pump', 'island dispenser'),
+#   ('golf ball',),
+#   ('parachute', 'chute')
+# ]
 print(f"{NUM_CLASSES=}, classes={CLASSES}")
 
 train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True, num_workers=2)
@@ -69,7 +82,7 @@ val_loader = DataLoader(val_dataset, batch_size=BATCH_SIZE, shuffle=False, num_w
 
 
 # ---------------------------------------------------------------------------
-# 2. Load a pretrained backbone -- TODO
+# 2. Load a pretrained backbone -- DONE
 # ---------------------------------------------------------------------------
 def build_pretrained_backbone() -> nn.Module:
     """Return a torchvision ResNet loaded with its ImageNet-pretrained weights.
@@ -84,11 +97,14 @@ def build_pretrained_backbone() -> nn.Module:
         of the final layer and read off its `in_features`/`out_features` --
         you'll need both in the next section.
     """
-    raise NotImplementedError
+    resnet18 = models.resnet18(weights=models.ResNet18_Weights.DEFAULT)
+    # uncomment to see the shape of this neural network
+    # print(resnet18)
+    return resnet18
 
 
 # ---------------------------------------------------------------------------
-# 3. Freeze every parameter -- TODO
+# 3. Freeze every parameter -- DONE
 # ---------------------------------------------------------------------------
 def freeze_all_parameters(model: nn.Module) -> None:
     """Set requires_grad=False on every parameter in `model`, in place.
@@ -98,11 +114,12 @@ def freeze_all_parameters(model: nn.Module) -> None:
     This is the same `requires_grad` flag from Lesson 1, just flipped off
     instead of on.
     """
-    raise NotImplementedError
+    for param in model.parameters():
+        param.requires_grad = False
 
 
 # ---------------------------------------------------------------------------
-# 4. Replace the classification head -- TODO
+# 4. Replace the classification head -- DONE
 # ---------------------------------------------------------------------------
 def replace_classifier_head(model: nn.Module, num_classes: int) -> nn.Module:
     """Swap the final FC layer for a fresh nn.Linear with `num_classes` outputs.
@@ -118,7 +135,9 @@ def replace_classifier_head(model: nn.Module, num_classes: int) -> nn.Module:
         that both needs training and hasn't been frozen by step 3, as long
         as you replace it *after* freezing.
     """
-    raise NotImplementedError
+    in_features = model.fc.in_features
+    model.fc = nn.Linear(in_features, num_classes)
+    return model
 
 
 # ---------------------------------------------------------------------------
@@ -170,10 +189,10 @@ def evaluate(
 
 
 # ---------------------------------------------------------------------------
-# 6. Optimizer -- TODO
+# 6. Optimizer -- DONE
 # ---------------------------------------------------------------------------
 def build_optimizer(model: nn.Module, lr: float) -> optim.Optimizer:
-    """Build an Adam optimizer that updates only the head's parameters.
+    """Build an Adam optimizer that updates only the head's (last layer) parameters.
 
     Why this matters: after steps 3-4, most of `model`'s parameters have
     `requires_grad=False`. Handing `model.parameters()` to the optimizer
@@ -188,7 +207,8 @@ def build_optimizer(model: nn.Module, lr: float) -> optim.Optimizer:
         the trainable ones regardless of attribute name -- handy if you
         change which layers are frozen later (Lesson 8).
     """
-    raise NotImplementedError
+    optimizer = optim.Adam(model.fc.parameters(), lr=lr)
+    return optimizer
 
 
 # ---------------------------------------------------------------------------
